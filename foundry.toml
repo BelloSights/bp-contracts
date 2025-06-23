@@ -1,0 +1,48 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.26"
+optimizer = true
+optimizer_runs = 10000
+# NOTE: viaIR doesn't work with `forge coverage`
+viaIR = true
+build_info = true
+extra_output = ["storageLayout"]
+
+[etherscan]
+8453 = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api" }
+84532 = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+543210 = { key = "", url = "https://explorer.zero.network/api" }
+4457845 = { key = "", url = "https://explorer.zero.network/api" }
+
+[profile.verifier]
+8453 = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api" }
+84532 = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+543210 = { key = "", url = "https://explorer.zero.network/api" }
+4457845 = { key = "", url = "https://explorer.zero.network/api" }
+
+[profile.verifier.delay]
+8453 = 15
+84532 = 15
+543210 = 15
+4457845 = 30
+
+[profile.verifier.retries]
+runs = 3
+delay = 10
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[fmt]
+line_length = 100
+
+gas_reports = ["*"]
+
+[fuzz]
+runs = 300
+seed = "0x1"
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = true
