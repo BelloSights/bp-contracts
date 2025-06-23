@@ -1,0 +1,26 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+# /broadcast/*/5/
+/broadcast/**/dry-run/
+broadcast/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# local tests
+coverage-report.txt
+.gas-snapshot
+bin/*
+
+node_modules
+zkout/
+
+.DS_Store
