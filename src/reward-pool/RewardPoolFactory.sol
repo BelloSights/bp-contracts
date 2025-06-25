@@ -11,10 +11,10 @@ __________.__                             .__        __
 pragma solidity 0.8.26;
 
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
-import {AccessControlUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {RewardPool} from "./RewardPool.sol";
 import {IRewardPool} from "./interfaces/IRewardPool.sol";
@@ -41,6 +41,7 @@ contract RewardPoolFactory is
 
     // ===== STATE =====
     uint256 public s_nextPoolId;
+    address public implementation;
 
     struct PoolInfo {
         uint256 poolId;
@@ -63,8 +64,17 @@ contract RewardPoolFactory is
     event PoolActivated(uint256 indexed poolId);
     event PoolDeactivated(uint256 indexed poolId);
     event UserAdded(uint256 indexed poolId, address indexed user, uint256 xp);
-    event XPUpdated(uint256 indexed poolId, address indexed user, uint256 oldXP, uint256 newXP);
-    event UserPenalized(uint256 indexed poolId, address indexed user, uint256 xpRemoved);
+    event XPUpdated(
+        uint256 indexed poolId,
+        address indexed user,
+        uint256 oldXP,
+        uint256 newXP
+    );
+    event UserPenalized(
+        uint256 indexed poolId,
+        address indexed user,
+        uint256 xpRemoved
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -73,12 +83,29 @@ contract RewardPoolFactory is
 
     /// @notice Initializes the RewardPoolFactory contract
     /// @param admin Address to be granted the default admin role
-    function initialize(address admin) external initializer {
+    /// @param _implementation Address of the RewardPool implementation contract
+    function initialize(
+        address admin,
+        address _implementation
+    ) external initializer {
         if (admin == address(0)) revert RewardPoolFactory__ZeroAddress();
+        if (_implementation == address(0))
+            revert RewardPoolFactory__ZeroAddress();
         __AccessControl_init();
         __UUPSUpgradeable_init();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        implementation = _implementation;
         s_nextPoolId = 1;
+    }
+
+    /// @notice Sets the RewardPool implementation contract address
+    /// @param _implementation New implementation address
+    function setImplementation(
+        address _implementation
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_implementation == address(0))
+            revert RewardPoolFactory__ZeroAddress();
+        implementation = _implementation;
     }
 
     /// @notice Creates a new reward pool
@@ -89,34 +116,30 @@ contract RewardPoolFactory is
         string calldata name,
         string calldata description
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
+        if (implementation == address(0))
+            revert RewardPoolFactory__ZeroAddress();
+
         uint256 poolId = s_nextPoolId;
 
-        // Deploy RewardPool implementation
-        RewardPool implementation = new RewardPool{
-            salt: bytes32(keccak256(abi.encode(poolId, "impl")))
-        }();
+        // Create a clone of the shared implementation
+        address clone = Clones.clone(implementation);
 
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
-            RewardPool.initialize.selector, address(this), SIGNING_DOMAIN, SIGNATURE_VERSION
+        // Initialize the clone
+        IRewardPool(clone).initialize(
+            address(this),
+            SIGNING_DOMAIN,
+            SIGNATURE_VERSION
         );
-
-        // Deploy proxy for the RewardPool
-        ERC1967Proxy proxy = new ERC1967Proxy{
-            salt: bytes32(keccak256(abi.encode(poolId, "proxy")))
-        }(address(implementation), initData);
-
-        address poolAddress = address(proxy);
 
         s_pools[poolId] = PoolInfo({
             poolId: poolId,
-            pool: poolAddress,
+            pool: clone,
             active: false, // Pools start inactive
             name: name,
             description: description
         });
 
-        emit PoolCreated(poolId, poolAddress, name, description);
+        emit PoolCreated(poolId, clone, name, description);
 
         unchecked {
             s_nextPoolId++;
@@ -127,7 +150,9 @@ contract RewardPoolFactory is
 
     /// @notice Activates a reward pool to allow claiming
     /// @param poolId The identifier of the pool to activate
-    function activatePool(uint256 poolId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function activatePool(
+        uint256 poolId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -138,7 +163,9 @@ contract RewardPoolFactory is
 
     /// @notice Deactivates a reward pool to prevent claiming
     /// @param poolId The identifier of the pool to deactivate
-    function deactivatePool(uint256 poolId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function deactivatePool(
+        uint256 poolId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -151,10 +178,11 @@ contract RewardPoolFactory is
     /// @param poolId The pool identifier
     /// @param user The user address to add
     /// @param xp The initial XP amount for the user
-    function addUser(uint256 poolId, address user, uint256 xp)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function addUser(
+        uint256 poolId,
+        address user,
+        uint256 xp
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -166,10 +194,11 @@ contract RewardPoolFactory is
     /// @param poolId The pool identifier
     /// @param user The user address
     /// @param newXP The new XP amount
-    function updateUserXP(uint256 poolId, address user, uint256 newXP)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateUserXP(
+        uint256 poolId,
+        address user,
+        uint256 newXP
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -182,10 +211,11 @@ contract RewardPoolFactory is
     /// @param poolId The pool identifier
     /// @param user The user address
     /// @param xpToRemove Amount of XP to remove
-    function penalizeUser(uint256 poolId, address user, uint256 xpToRemove)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function penalizeUser(
+        uint256 poolId,
+        address user,
+        uint256 xpToRemove
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -193,15 +223,96 @@ contract RewardPoolFactory is
         emit UserPenalized(poolId, user, xpToRemove);
     }
 
+    // ===== BATCH USER MANAGEMENT FUNCTIONS =====
 
+    /// @notice Adds multiple users to a reward pool with initial XP in batches
+    /// @param poolId The pool identifier
+    /// @param users Array of user addresses to add
+    /// @param xpAmounts Array of initial XP amounts for users
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    function batchAddUsers(
+        uint256 poolId,
+        address[] calldata users,
+        uint256[] calldata xpAmounts
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        PoolInfo storage info = s_pools[poolId];
+        if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
+
+        IRewardPool(info.pool).batchAddUsers(users, xpAmounts);
+
+        // Emit individual events for each user for compatibility
+        for (uint256 i = 0; i < users.length; ) {
+            emit UserAdded(poolId, users[i], xpAmounts[i]);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice Updates XP for multiple existing users in batches
+    /// @param poolId The pool identifier
+    /// @param users Array of user addresses
+    /// @param newXPAmounts Array of new XP amounts
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    function batchUpdateUserXP(
+        uint256 poolId,
+        address[] calldata users,
+        uint256[] calldata newXPAmounts
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        PoolInfo storage info = s_pools[poolId];
+        if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
+
+        // Get old XP values for events
+        uint256[] memory oldXPAmounts = new uint256[](users.length);
+        for (uint256 i = 0; i < users.length; ) {
+            oldXPAmounts[i] = IRewardPool(info.pool).getUserXP(users[i]);
+            unchecked {
+                ++i;
+            }
+        }
+
+        IRewardPool(info.pool).batchUpdateUserXP(users, newXPAmounts);
+
+        // Emit individual events for each user for compatibility
+        for (uint256 i = 0; i < users.length; ) {
+            emit XPUpdated(poolId, users[i], oldXPAmounts[i], newXPAmounts[i]);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice Penalizes multiple users by removing XP in batches
+    /// @param poolId The pool identifier
+    /// @param users Array of user addresses
+    /// @param xpToRemove Array of XP amounts to remove
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    function batchPenalizeUsers(
+        uint256 poolId,
+        address[] calldata users,
+        uint256[] calldata xpToRemove
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        PoolInfo storage info = s_pools[poolId];
+        if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
+
+        IRewardPool(info.pool).batchPenalizeUsers(users, xpToRemove);
+
+        // Emit individual events for each user for compatibility
+        for (uint256 i = 0; i < users.length; ) {
+            emit UserPenalized(poolId, users[i], xpToRemove[i]);
+            unchecked {
+                ++i;
+            }
+        }
+    }
 
     /// @notice Grants signer role to an address for a specific pool
     /// @param poolId The pool identifier
     /// @param signer The address to grant signer role
-    function grantSignerRole(uint256 poolId, address signer)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function grantSignerRole(
+        uint256 poolId,
+        address signer
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -211,10 +322,10 @@ contract RewardPoolFactory is
     /// @notice Revokes signer role from an address for a specific pool
     /// @param poolId The pool identifier
     /// @param signer The address to revoke signer role from
-    function revokeSignerRole(uint256 poolId, address signer)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function revokeSignerRole(
+        uint256 poolId,
+        address signer
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -224,10 +335,10 @@ contract RewardPoolFactory is
     /// @notice Takes a snapshot of current balances for reward distribution
     /// @param poolId The pool identifier
     /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function takeSnapshot(uint256 poolId, address[] calldata tokenAddresses)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function takeSnapshot(
+        uint256 poolId,
+        address[] calldata tokenAddresses
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -236,10 +347,9 @@ contract RewardPoolFactory is
 
     /// @notice Takes a snapshot of only native ETH for reward distribution
     /// @param poolId The pool identifier
-    function takeNativeSnapshot(uint256 poolId)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function takeNativeSnapshot(
+        uint256 poolId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
@@ -262,13 +372,20 @@ contract RewardPoolFactory is
         PoolInfo storage info = s_pools[poolId];
         if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
 
-        IRewardPool(info.pool).emergencyWithdraw(tokenAddress, to, amount, tokenType);
+        IRewardPool(info.pool).emergencyWithdraw(
+            tokenAddress,
+            to,
+            amount,
+            tokenType
+        );
     }
 
     /// @notice Gets pool information
     /// @param poolId The pool identifier
     /// @return Pool information struct
-    function getPoolInfo(uint256 poolId) external view returns (PoolInfo memory) {
+    function getPoolInfo(
+        uint256 poolId
+    ) external view returns (PoolInfo memory) {
         return s_pools[poolId];
     }
 
@@ -290,19 +407,14 @@ contract RewardPoolFactory is
 
     /// @notice Authorizes contract upgrades
     /// @param newImplementation New implementation address
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /// @notice Supports interface check
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(AccessControlUpgradeable)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }

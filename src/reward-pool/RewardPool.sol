@@ -10,15 +10,12 @@ __________.__                             .__        __
 
 pragma solidity 0.8.26;
 
-import {EIP712Upgradeable} from
-    "@openzeppelin-contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import {EIP712Upgradeable} from "@openzeppelin-contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {ECDSA} from "@openzeppelin-contracts/utils/cryptography/ECDSA.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
-import {AccessControlUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from
-    "@openzeppelin-contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 import {IRewardPool} from "./interfaces/IRewardPool.sol";
 
@@ -78,7 +75,8 @@ contract RewardPool is
     bool public s_snapshotTaken; // Whether snapshot has been taken
 
     // Claim tracking to prevent double claiming
-    mapping(address => mapping(address => mapping(TokenType => bool))) public s_hasClaimed;
+    mapping(address => mapping(address => mapping(TokenType => bool)))
+        public s_hasClaimed;
 
     // Track total claimed amounts to prevent over-allocation
     mapping(address => mapping(TokenType => uint256)) public s_totalClaimed;
@@ -88,7 +86,9 @@ contract RewardPool is
 
     // EIP-712 typehashes
     bytes32 internal constant CLAIM_DATA_HASH =
-        keccak256("ClaimData(address user,uint256 nonce,address tokenAddress,uint8 tokenType)");
+        keccak256(
+            "ClaimData(address user,uint256 nonce,address tokenAddress,uint8 tokenType)"
+        );
 
     // Constants for precision
     uint256 public constant PRECISION = 1000; // 3 decimal places (0.001 = 0.1%)
@@ -148,7 +148,9 @@ contract RewardPool is
 
     /// @notice Takes a snapshot of current balances for reward distribution
     /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function takeSnapshot(address[] calldata tokenAddresses) external onlyFactory {
+    function takeSnapshot(
+        address[] calldata tokenAddresses
+    ) external onlyFactory {
         _takeSnapshotWithTokens(tokenAddresses);
     }
 
@@ -170,20 +172,28 @@ contract RewardPool is
 
     /// @notice Internal function to take snapshot with specific tokens
     /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function _takeSnapshotWithTokens(address[] calldata tokenAddresses) internal {
+    function _takeSnapshotWithTokens(
+        address[] calldata tokenAddresses
+    ) internal {
         // Snapshot native ETH
         s_nativeRewardSnapshot = address(this).balance;
 
         // Snapshot ERC20 tokens
         uint256[] memory tokenAmounts = new uint256[](tokenAddresses.length);
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            uint256 balance = IERC20(tokenAddresses[i]).balanceOf(address(this));
+            uint256 balance = IERC20(tokenAddresses[i]).balanceOf(
+                address(this)
+            );
             s_rewardSnapshots[tokenAddresses[i]] = balance;
             tokenAmounts[i] = balance;
         }
 
         s_snapshotTaken = true;
-        emit SnapshotTaken(s_nativeRewardSnapshot, tokenAddresses, tokenAmounts);
+        emit SnapshotTaken(
+            s_nativeRewardSnapshot,
+            tokenAddresses,
+            tokenAmounts
+        );
     }
 
     /// @notice Adds a new user to the pool with initial XP
@@ -226,7 +236,10 @@ contract RewardPool is
     /// @notice Penalizes a user by removing XP
     /// @param user User address
     /// @param xpToRemove Amount of XP to remove
-    function penalizeUser(address user, uint256 xpToRemove) external onlyFactory {
+    function penalizeUser(
+        address user,
+        uint256 xpToRemove
+    ) external onlyFactory {
         if (s_active) revert RewardPool__CannotUpdateXPWhenActive();
         if (!s_isUser[user]) revert RewardPool__UserNotInPool();
 
@@ -257,12 +270,14 @@ contract RewardPool is
     /// @param tokenType Type of token
     /// @return canClaim True if user can claim
     /// @return allocation User's reward allocation
-    function checkClaimEligibility(address user, address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (bool canClaim, uint256 allocation)
-    {
-        if (!s_active || !s_isUser[user] || s_totalXP == 0 || !s_snapshotTaken) {
+    function checkClaimEligibility(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool canClaim, uint256 allocation) {
+        if (
+            !s_active || !s_isUser[user] || s_totalXP == 0 || !s_snapshotTaken
+        ) {
             return (false, 0);
         }
 
@@ -307,7 +322,9 @@ contract RewardPool is
 
         // Calculate user's allocation from snapshot: (userXP / totalXP) * snapshotAmount
         // Using PRECISION for better accuracy with small amounts
-        allocation = (snapshotAmount * userXP * PRECISION / s_totalXP) / PRECISION;
+        allocation =
+            ((snapshotAmount * userXP * PRECISION) / s_totalXP) /
+            PRECISION;
 
         // Check if there are sufficient available rewards to fulfill this allocation
         uint256 availableRewards;
@@ -329,11 +346,10 @@ contract RewardPool is
     /// @notice Claims rewards based on XP percentage
     /// @param data Claim data struct
     /// @param signature EIP-712 signature
-    function claimReward(ClaimData calldata data, bytes calldata signature)
-        external
-        nonReentrant
-        onlyActive
-    {
+    function claimReward(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external nonReentrant onlyActive {
         // Verify the user is in the pool
         if (!s_isUser[data.user]) revert RewardPool__UserNotInPool();
         if (data.user != msg.sender) revert RewardPool__InvalidSignature();
@@ -341,10 +357,12 @@ contract RewardPool is
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (data.tokenType == TokenType.NATIVE) {
             // NATIVE token MUST use address(0)
-            if (data.tokenAddress != address(0)) revert RewardPool__InvalidTokenType();
+            if (data.tokenAddress != address(0))
+                revert RewardPool__InvalidTokenType();
         } else if (data.tokenType == TokenType.ERC20) {
             // ERC20 token MUST NOT use address(0)
-            if (data.tokenAddress == address(0)) revert RewardPool__InvalidTokenType();
+            if (data.tokenAddress == address(0))
+                revert RewardPool__InvalidTokenType();
         } else {
             revert RewardPool__InvalidTokenType(); // Only NATIVE and ERC20 supported
         }
@@ -358,20 +376,28 @@ contract RewardPool is
         _validateSignature(data, signature);
 
         // Calculate user's reward allocation using checkClaimEligibility logic
-        (bool canClaim, uint256 rewardAmount) =
-            this.checkClaimEligibility(data.user, data.tokenAddress, data.tokenType);
+        (bool canClaim, uint256 rewardAmount) = this.checkClaimEligibility(
+            data.user,
+            data.tokenAddress,
+            data.tokenType
+        );
 
-        if (!canClaim || rewardAmount == 0) revert RewardPool__InsufficientRewards();
+        if (!canClaim || rewardAmount == 0)
+            revert RewardPool__InsufficientRewards();
 
         // Validate sufficient balance exists and transfer
         if (data.tokenType == TokenType.NATIVE) {
-            if (address(this).balance < rewardAmount) revert RewardPool__InsufficientPoolBalance();
+            if (address(this).balance < rewardAmount)
+                revert RewardPool__InsufficientPoolBalance();
 
-            (bool success,) = payable(data.user).call{value: rewardAmount}("");
+            (bool success, ) = payable(data.user).call{value: rewardAmount}("");
             if (!success) revert RewardPool__TransferFailed();
         } else if (data.tokenType == TokenType.ERC20) {
-            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(address(this));
-            if (contractBalance < rewardAmount) revert RewardPool__InsufficientPoolBalance();
+            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(
+                address(this)
+            );
+            if (contractBalance < rewardAmount)
+                revert RewardPool__InsufficientPoolBalance();
 
             IERC20(data.tokenAddress).transfer(data.user, rewardAmount);
         } else {
@@ -406,23 +432,28 @@ contract RewardPool is
     ) external onlyFactory {
         // Prevent withdrawal when pool is active to protect user claims
         if (s_active) revert RewardPool__CannotWithdrawWhenActive();
-        
+
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (tokenType == TokenType.NATIVE) {
             // NATIVE token MUST use address(0)
-            if (tokenAddress != address(0)) revert RewardPool__InvalidTokenType();
+            if (tokenAddress != address(0))
+                revert RewardPool__InvalidTokenType();
         } else if (tokenType == TokenType.ERC20) {
             // ERC20 token MUST NOT use address(0)
-            if (tokenAddress == address(0)) revert RewardPool__InvalidTokenType();
+            if (tokenAddress == address(0))
+                revert RewardPool__InvalidTokenType();
         } else {
             revert RewardPool__InvalidTokenType(); // Only NATIVE and ERC20 supported
         }
         if (tokenType == TokenType.NATIVE) {
-            if (address(this).balance < amount) revert RewardPool__InsufficientPoolBalance();
-            (bool success,) = payable(to).call{value: amount}("");
+            if (address(this).balance < amount)
+                revert RewardPool__InsufficientPoolBalance();
+            (bool success, ) = payable(to).call{value: amount}("");
             if (!success) revert RewardPool__TransferFailed();
         } else if (tokenType == TokenType.ERC20) {
-            uint256 contractBalance = IERC20(tokenAddress).balanceOf(address(this));
+            uint256 contractBalance = IERC20(tokenAddress).balanceOf(
+                address(this)
+            );
             if (contractBalance < amount) {
                 revert RewardPool__InsufficientPoolBalance();
             }
@@ -467,11 +498,11 @@ contract RewardPool is
     /// @param tokenAddress Token address
     /// @param tokenType Type of token
     /// @return True if user has already claimed
-    function hasClaimed(address user, address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (bool)
-    {
+    function hasClaimed(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool) {
         return s_hasClaimed[user][tokenAddress][tokenType];
     }
 
@@ -479,11 +510,10 @@ contract RewardPool is
     /// @param tokenAddress Token address
     /// @param tokenType Type of token
     /// @return Total amount claimed
-    function getTotalClaimed(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256)
-    {
+    function getTotalClaimed(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256) {
         return s_totalClaimed[tokenAddress][tokenType];
     }
 
@@ -491,11 +521,10 @@ contract RewardPool is
     /// @param tokenAddress Token address (use address(0) for native)
     /// @param tokenType The token type (NATIVE or ERC20)
     /// @return amount The snapshot amount
-    function getSnapshotAmount(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256 amount)
-    {
+    function getSnapshotAmount(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256 amount) {
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (tokenType == TokenType.NATIVE) {
             // NATIVE token MUST use address(0)
@@ -513,11 +542,10 @@ contract RewardPool is
     /// @param tokenAddress Token address (use address(0) for native)
     /// @param tokenType The token type (NATIVE or ERC20)
     /// @return balance The current available balance
-    function getAvailableRewards(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256 balance)
-    {
+    function getAvailableRewards(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256 balance) {
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (tokenType == TokenType.NATIVE) {
             // NATIVE token MUST use address(0)
@@ -535,11 +563,10 @@ contract RewardPool is
     /// @param tokenAddress Token address (use address(0) for native)
     /// @param tokenType The token type (NATIVE or ERC20)
     /// @return total The total rewards (snapshot + claimed)
-    function getTotalRewards(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256 total)
-    {
+    function getTotalRewards(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256 total) {
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (tokenType == TokenType.NATIVE) {
             // NATIVE token MUST use address(0)
@@ -550,7 +577,7 @@ contract RewardPool is
         } else {
             return 0; // Invalid token type
         }
-        
+
         uint256 snapshotAmount;
         if (tokenType == TokenType.NATIVE) {
             snapshotAmount = s_nativeRewardSnapshot;
@@ -571,7 +598,10 @@ contract RewardPool is
     /// @param user User address
     /// @param nonce Nonce to check
     /// @return True if nonce has been used
-    function isNonceUsed(address user, uint256 nonce) external view returns (bool) {
+    function isNonceUsed(
+        address user,
+        uint256 nonce
+    ) external view returns (bool) {
         return s_usedNonces[user][nonce];
     }
 
@@ -585,20 +615,29 @@ contract RewardPool is
     /// @notice Validates EIP-712 signature and nonce
     /// @param data Claim data
     /// @param signature Signature to validate
-    function _validateSignature(ClaimData calldata data, bytes calldata signature) internal {
+    function _validateSignature(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) internal {
         // Check if this user has already used this nonce
-        if (s_usedNonces[data.user][data.nonce]) revert RewardPool__NonceAlreadyUsed();
+        if (s_usedNonces[data.user][data.nonce])
+            revert RewardPool__NonceAlreadyUsed();
 
         bytes32 digest = _hashTypedDataV4(
             keccak256(
                 abi.encode(
-                    CLAIM_DATA_HASH, data.user, data.nonce, data.tokenAddress, data.tokenType
+                    CLAIM_DATA_HASH,
+                    data.user,
+                    data.nonce,
+                    data.tokenAddress,
+                    data.tokenType
                 )
             )
         );
 
         address signer = digest.recover(signature);
-        if (!hasRole(SIGNER_ROLE, signer)) revert RewardPool__InvalidSignature();
+        if (!hasRole(SIGNER_ROLE, signer))
+            revert RewardPool__InvalidSignature();
 
         // Mark this nonce as used for this user
         s_usedNonces[data.user][data.nonce] = true;
@@ -611,19 +650,14 @@ contract RewardPool is
 
     /// @notice Authorizes contract upgrades
     /// @param newImplementation New implementation address
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /// @notice Supports interface check
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(AccessControlUpgradeable)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 
@@ -637,5 +671,216 @@ contract RewardPool is
     fallback() external payable {
         // ETH is received - no special handling needed
         // Snapshots will capture the balance when taken
+    }
+
+    // ===== BATCH USER MANAGEMENT FUNCTIONS =====
+
+    /// @notice Adds multiple users to the pool with initial XP in batches
+    /// @param users Array of user addresses
+    /// @param xpAmounts Array of initial XP amounts
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    /// @dev Duplicate detection handled client-side for gas efficiency.
+    function batchAddUsers(
+        address[] calldata users,
+        uint256[] calldata xpAmounts
+    ) external onlyFactory {
+        if (s_active) revert RewardPool__CannotUpdateXPWhenActive();
+        if (users.length != xpAmounts.length || users.length == 0)
+            revert RewardPool__InvalidXPAmount();
+
+        uint256 totalXPToAdd = 0;
+        uint256 batchSize = users.length;
+
+        // First pass: validate all inputs and calculate total XP
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 xp = xpAmounts[i];
+
+            if (user == address(0)) revert RewardPool__ZeroAddress();
+            if (xp == 0) revert RewardPool__ZeroXP();
+            if (s_isUser[user]) revert RewardPool__UserAlreadyExists();
+
+            totalXPToAdd += xp; // Solidity 0.8+ has built-in overflow protection
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Second pass: add all users (state changes)
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 xp = xpAmounts[i];
+
+            s_userXP[user] = xp;
+            s_users.push(user);
+            s_isUser[user] = true;
+
+            emit UserAdded(user, xp);
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Update total XP once (gas efficient)
+        s_totalXP += totalXPToAdd;
+
+        emit BatchUsersAdded(users, xpAmounts, batchSize);
+    }
+
+    /// @notice Updates XP for multiple existing users in batches
+    /// @param users Array of user addresses
+    /// @param newXPAmounts Array of new XP amounts
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    function batchUpdateUserXP(
+        address[] calldata users,
+        uint256[] calldata newXPAmounts
+    ) external onlyFactory {
+        if (s_active) revert RewardPool__CannotUpdateXPWhenActive();
+        if (users.length != newXPAmounts.length || users.length == 0)
+            revert RewardPool__InvalidXPAmount();
+
+        uint256 batchSize = users.length;
+        uint256[] memory oldXPAmounts = new uint256[](batchSize);
+        uint256 totalXPChange = 0;
+        bool isXPIncreasing = true;
+
+        // First pass: validate and calculate XP changes
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 newXP = newXPAmounts[i];
+
+            if (!s_isUser[user]) revert RewardPool__UserNotInPool();
+
+            uint256 oldXP = s_userXP[user];
+            oldXPAmounts[i] = oldXP;
+
+            if (i == 0) {
+                // Determine direction of XP change based on first user
+                isXPIncreasing = newXP >= oldXP;
+                totalXPChange = isXPIncreasing
+                    ? (newXP - oldXP)
+                    : (oldXP - newXP);
+            } else {
+                // Accumulate XP changes
+                if (isXPIncreasing && newXP >= oldXP) {
+                    totalXPChange += (newXP - oldXP);
+                } else if (isXPIncreasing && newXP < oldXP) {
+                    // Mixed directions, need to handle carefully
+                    if (totalXPChange >= (oldXP - newXP)) {
+                        totalXPChange -= (oldXP - newXP);
+                    } else {
+                        totalXPChange = (oldXP - newXP) - totalXPChange;
+                        isXPIncreasing = false;
+                    }
+                } else if (!isXPIncreasing && newXP <= oldXP) {
+                    totalXPChange += (oldXP - newXP);
+                } else if (!isXPIncreasing && newXP > oldXP) {
+                    // Mixed directions, need to handle carefully
+                    if (totalXPChange >= (newXP - oldXP)) {
+                        totalXPChange -= (newXP - oldXP);
+                    } else {
+                        totalXPChange = (newXP - oldXP) - totalXPChange;
+                        isXPIncreasing = true;
+                    }
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Second pass: update user XP and handle user removal for zero XP
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 newXP = newXPAmounts[i];
+            uint256 oldXP = oldXPAmounts[i];
+
+            s_userXP[user] = newXP;
+
+            // Remove user if XP becomes 0
+            if (newXP == 0) {
+                s_isUser[user] = false;
+                // Note: We keep them in s_users array for historical tracking
+            }
+
+            emit UserXPUpdated(user, oldXP, newXP);
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Update total XP based on calculated change
+        if (isXPIncreasing) {
+            s_totalXP += totalXPChange;
+        } else {
+            s_totalXP = s_totalXP >= totalXPChange
+                ? s_totalXP - totalXPChange
+                : 0;
+        }
+
+        emit BatchUsersUpdated(users, oldXPAmounts, newXPAmounts, batchSize);
+    }
+
+    /// @notice Penalizes multiple users by removing XP in batches
+    /// @param users Array of user addresses
+    /// @param xpToRemove Array of XP amounts to remove
+    /// @dev Gas-optimized for large user sets. Arrays must be same length.
+    function batchPenalizeUsers(
+        address[] calldata users,
+        uint256[] calldata xpToRemove
+    ) external onlyFactory {
+        if (s_active) revert RewardPool__CannotUpdateXPWhenActive();
+        if (users.length != xpToRemove.length || users.length == 0)
+            revert RewardPool__InvalidXPAmount();
+
+        uint256 batchSize = users.length;
+        uint256 totalXPRemoved = 0;
+
+        // First pass: validate all inputs and calculate total XP to remove
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 xpPenalty = xpToRemove[i];
+
+            if (!s_isUser[user]) revert RewardPool__UserNotInPool();
+
+            uint256 currentXP = s_userXP[user];
+            uint256 actualXPRemoved = currentXP > xpPenalty
+                ? xpPenalty
+                : currentXP;
+            totalXPRemoved += actualXPRemoved;
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Second pass: apply penalties
+        for (uint256 i = 0; i < batchSize; ) {
+            address user = users[i];
+            uint256 xpPenalty = xpToRemove[i];
+
+            uint256 currentXP = s_userXP[user];
+            uint256 newXP = currentXP > xpPenalty ? currentXP - xpPenalty : 0;
+            uint256 actualXPRemoved = currentXP - newXP;
+
+            s_userXP[user] = newXP;
+
+            emit UserPenalized(user, actualXPRemoved);
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Update total XP once
+        s_totalXP = s_totalXP >= totalXPRemoved
+            ? s_totalXP - totalXPRemoved
+            : 0;
+
+        emit BatchUsersPenalized(users, xpToRemove, batchSize);
     }
 }

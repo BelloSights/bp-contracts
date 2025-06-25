@@ -34,6 +34,13 @@ contract DeployRewardPool is Script {
         console.log("=== DEPLOYING TO BASE SEPOLIA ===");
         console.log("Deployer/Admin:", deployer);
 
+        // Deploy RewardPool implementation first
+        RewardPool rewardPoolImpl = new RewardPool();
+        console.log(
+            "RewardPool implementation deployed at:",
+            address(rewardPoolImpl)
+        );
+
         // Deploy factory implementation
         RewardPoolFactory implementation = new RewardPoolFactory();
         console.log(
@@ -44,7 +51,8 @@ contract DeployRewardPool is Script {
         // Deploy ERC1967Proxy for upgradeable pattern
         bytes memory initData = abi.encodeWithSelector(
             RewardPoolFactory.initialize.selector,
-            deployer
+            deployer,
+            address(rewardPoolImpl)
         );
 
         ERC1967Proxy proxy = new ERC1967Proxy(
@@ -91,6 +99,8 @@ contract DeployRewardPool is Script {
             "RewardPoolFactory (Implementation):",
             address(implementation)
         );
+        console.log("RewardPool (Implementation):", address(rewardPoolImpl));
+        console.log("RewardPool implementation in factory:", factory.implementation());
         console.log("Example Pool ID:", poolId);
         console.log("Example Pool Address:", poolAddress);
         console.log("Pool Admin:", deployer);

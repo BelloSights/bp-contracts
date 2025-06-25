@@ -7,7 +7,7 @@ endif
 # Load environment variables
 -include $(ENV_FILE)
 
-.PHONY: deploy test coverage build fork_test deploy_nft_factory upgrade_nft_factory verify_base_sepolia verify_base install-foundry-zksync deploy_nft_factory_zero verify_erc1155_implementation verify_blueprint_factory_implementation
+.PHONY: deploy test coverage build fork_test deploy_nft_factory upgrade_nft_factory verify_base_sepolia verify_base install-foundry-zksync deploy_nft_factory_zero verify_erc1155_implementation verify_blueprint_factory_implementation test-reward-pool deploy_reward_pool upgrade_reward_pool
 
 DEFAULT_ANVIL_PRIVATE_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -28,6 +28,9 @@ test:
 
 test-coverage:
 	@source .env.test && forge coverage --ffi
+
+test-reward-pool:
+	@source .env.test && forge clean && forge test --match-contract RewardPoolTest -vvvv --ffi
 
 coverage :; forge coverage --ffi --report debug > coverage-report.txt
 snapshot :; forge snapshot --ffi
@@ -91,6 +94,12 @@ deploy_nft_factory_zero:
 		--zksync \
 		-vvvv \
 		--ffi
+
+deploy_reward_pool:
+	@source $(ENV_FILE) && forge script script/DeployRewardPool.s.sol:DeployRewardPool $(NETWORK_ARGS) --ffi
+
+upgrade_reward_pool:
+	@source $(ENV_FILE) && forge script script/UpgradeRewardPool.s.sol:UpgradeRewardPool $(NETWORK_ARGS) --ffi
 
 upgrade_nft_factory:
 	@source $(ENV_FILE) && forge script script/UpgradeBlueprintNFT.s.sol:UpgradeBlueprintNFT $(NETWORK_ARGS) \

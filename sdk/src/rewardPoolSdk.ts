@@ -1,7 +1,7 @@
-import { ethers } from 'ethers';
-import { Address, PublicClient, WalletClient } from 'viem';
-import { rewardPoolAbi, rewardPoolFactoryAbi } from '../abis';
-import { createViemClients, getContractsForChain } from './viem';
+import { ethers } from "ethers";
+import { Address, PublicClient, WalletClient } from "viem";
+import { rewardpoolAbi, rewardpoolfactoryAbi } from "../abis";
+import { createViemClients, getContractsForChain } from "./viem";
 
 /**
  * RewardPool System:
@@ -66,18 +66,20 @@ export class RewardPoolSDK {
   private FACTORY_ADDRESS!: Address;
 
   // EIP-712 constants
-  private readonly SIGNING_DOMAIN = 'BP_REWARD_POOL';
-  private readonly SIGNATURE_VERSION = '1';
+  private readonly SIGNING_DOMAIN = "BP_REWARD_POOL";
+  private readonly SIGNATURE_VERSION = "1";
 
   constructor(chainId: number) {
     this.chainId = chainId;
   }
 
   async initialize() {
-    const { publicClient, walletClient } = await createViemClients(this.chainId);
+    const { publicClient, walletClient } = await createViemClients(
+      this.chainId
+    );
     this.publicClient = publicClient;
     this.walletClient = walletClient;
-    
+
     // Set factory address from chain configuration
     const contracts = getContractsForChain(this.chainId);
     this.FACTORY_ADDRESS = contracts.rewardPoolFactoryContract.address;
@@ -98,12 +100,12 @@ export class RewardPoolSDK {
     bypassSimulation?: boolean;
   }) {
     if (!this.walletClient.account) {
-      throw new Error('Wallet account not available');
+      throw new Error("Wallet account not available");
     }
 
     try {
       // Wait for a short period to allow previous transactions to complete
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // Get the chain configuration
       const { chain } = getContractsForChain(this.chainId).dropFactoryContract;
@@ -132,8 +134,8 @@ export class RewardPoolSDK {
         } catch (error: any) {
           // Check if this is a rate limit error (HTTP 429)
           const is429Error =
-            error.message?.includes('HTTP request failed') &&
-            error.message?.includes('Status: 429');
+            error.message?.includes("HTTP request failed") &&
+            error.message?.includes("Status: 429");
 
           // If not a rate limit error or reached max attempts, throw
           if (!is429Error || simulationAttempt >= maxSimulationAttempts - 1) {
@@ -148,7 +150,9 @@ export class RewardPoolSDK {
           );
 
           // Wait with exponential backoff
-          await new Promise(resolve => setTimeout(resolve, simulationBackoffMs));
+          await new Promise((resolve) =>
+            setTimeout(resolve, simulationBackoffMs)
+          );
 
           // Increase backoff for next attempt (exponential with randomness)
           simulationBackoffMs = Math.min(
@@ -183,8 +187,8 @@ export class RewardPoolSDK {
 
           // Check for rate limit errors
           const is429Error =
-            error.message?.includes('HTTP request failed') &&
-            error.message?.includes('Status: 429');
+            error.message?.includes("HTTP request failed") &&
+            error.message?.includes("Status: 429");
 
           // Handle different error types
           if (is429Error && attempt < maxAttempts) {
@@ -193,16 +197,21 @@ export class RewardPoolSDK {
             );
 
             // Wait with exponential backoff
-            await new Promise(resolve => setTimeout(resolve, txBackoffMs));
+            await new Promise((resolve) => setTimeout(resolve, txBackoffMs));
 
             // Increase backoff for next attempt (exponential with randomness)
-            txBackoffMs = Math.min(txBackoffMs * 1.5 * (1 + 0.2 * Math.random()), 15000);
+            txBackoffMs = Math.min(
+              txBackoffMs * 1.5 * (1 + 0.2 * Math.random()),
+              15000
+            );
           } else if (
-            error.message?.includes('replacement transaction underpriced') &&
+            error.message?.includes("replacement transaction underpriced") &&
             attempt < maxAttempts
           ) {
-            console.log(`Retry attempt ${attempt} after replacement transaction error...`);
-            await new Promise(resolve => setTimeout(resolve, 3000 * attempt));
+            console.log(
+              `Retry attempt ${attempt} after replacement transaction error...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, 3000 * attempt));
           } else if (attempt >= maxAttempts) {
             throw error;
           }
@@ -210,13 +219,15 @@ export class RewardPoolSDK {
       }
 
       if (!hash) {
-        throw new Error('Failed to send transaction after multiple attempts');
+        throw new Error("Failed to send transaction after multiple attempts");
       }
 
       // Wait for the transaction to complete with increased timeout
       // Default to 90 seconds for testnet, which can be slow
       const waitTimeoutMs = params.waitTimeoutMs || 90_000;
-      console.log(`Waiting up to ${waitTimeoutMs / 1000} seconds for transaction confirmation...`);
+      console.log(
+        `Waiting up to ${waitTimeoutMs / 1000} seconds for transaction confirmation...`
+      );
 
       // Add more detailed receipt waiting with retries
       let receipt = null as any;
@@ -238,8 +249,8 @@ export class RewardPoolSDK {
 
           // Check for rate limit errors
           const is429Error =
-            error.message?.includes('HTTP request failed') &&
-            error.message?.includes('Status: 429');
+            error.message?.includes("HTTP request failed") &&
+            error.message?.includes("Status: 429");
 
           if (is429Error && receiptAttempt < maxReceiptAttempts) {
             console.warn(
@@ -247,10 +258,15 @@ export class RewardPoolSDK {
             );
 
             // Wait with exponential backoff
-            await new Promise(resolve => setTimeout(resolve, receiptBackoffMs));
+            await new Promise((resolve) =>
+              setTimeout(resolve, receiptBackoffMs)
+            );
 
             // Increase backoff for next attempt
-            receiptBackoffMs = Math.min(receiptBackoffMs * 1.5 * (1 + 0.2 * Math.random()), 15000);
+            receiptBackoffMs = Math.min(
+              receiptBackoffMs * 1.5 * (1 + 0.2 * Math.random()),
+              15000
+            );
           } else {
             console.log(
               `Receipt attempt ${receiptAttempt}/${maxReceiptAttempts} failed. Retrying...`
@@ -258,7 +274,9 @@ export class RewardPoolSDK {
 
             // If we've reached max attempts, rethrow the error
             if (receiptAttempt >= maxReceiptAttempts) {
-              console.error(`Transaction was sent with hash ${hash} but confirmation timed out.`);
+              console.error(
+                `Transaction was sent with hash ${hash} but confirmation timed out.`
+              );
               console.error(
                 `You can check the transaction status manually at: https://sepolia.basescan.org/tx/${hash}`
               );
@@ -266,7 +284,9 @@ export class RewardPoolSDK {
             }
 
             // Wait a bit longer before retrying
-            await new Promise(resolve => setTimeout(resolve, 5000 * receiptAttempt));
+            await new Promise((resolve) =>
+              setTimeout(resolve, 5000 * receiptAttempt)
+            );
           }
         }
       }
@@ -312,7 +332,8 @@ export class RewardPoolSDK {
       } catch (error: any) {
         // Check if this is a rate limit error (HTTP 429)
         const is429Error =
-          error.message?.includes('HTTP request failed') && error.message?.includes('Status: 429');
+          error.message?.includes("HTTP request failed") &&
+          error.message?.includes("Status: 429");
 
         // If we've reached max retries or it's not a rate limit error, throw
         if (retryCount >= maxRetries) {
@@ -327,10 +348,13 @@ export class RewardPoolSDK {
         );
 
         // Wait with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
 
         // Increase backoff for next attempt (exponential with some randomness)
-        backoffMs = Math.min(backoffMs * 1.5 * (1 + 0.2 * Math.random()), 15000);
+        backoffMs = Math.min(
+          backoffMs * 1.5 * (1 + 0.2 * Math.random()),
+          15000
+        );
         retryCount++;
       }
     }
@@ -344,9 +368,12 @@ export class RewardPoolSDK {
   /**
    * Generate EIP-712 signature for claim data
    */
-  async generateClaimSignature(claimData: ClaimData, poolAddress: Address): Promise<`0x${string}`> {
+  async generateClaimSignature(
+    claimData: ClaimData,
+    poolAddress: Address
+  ): Promise<`0x${string}`> {
     if (!this.walletClient.account) {
-      throw new Error('Wallet account not available');
+      throw new Error("Wallet account not available");
     }
 
     // Add retry logic for RPC calls
@@ -367,10 +394,10 @@ export class RewardPoolSDK {
 
         const types = {
           ClaimData: [
-            { name: 'user', type: 'address' },
-            { name: 'nonce', type: 'uint256' },
-            { name: 'tokenAddress', type: 'address' },
-            { name: 'tokenType', type: 'uint8' },
+            { name: "user", type: "address" },
+            { name: "nonce", type: "uint256" },
+            { name: "tokenAddress", type: "address" },
+            { name: "tokenType", type: "uint8" },
           ],
         };
 
@@ -378,13 +405,14 @@ export class RewardPoolSDK {
           account: this.walletClient.account,
           domain,
           types,
-          primaryType: 'ClaimData',
+          primaryType: "ClaimData",
           message: claimData,
         });
       } catch (error: any) {
         // Check if this is a rate limit error (HTTP 429)
         const is429Error =
-          error.message?.includes('HTTP request failed') && error.message?.includes('Status: 429');
+          error.message?.includes("HTTP request failed") &&
+          error.message?.includes("Status: 429");
 
         if (is429Error && retryCount < maxRetries) {
           console.warn(
@@ -394,10 +422,13 @@ export class RewardPoolSDK {
           );
 
           // Wait with exponential backoff
-          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
 
           // Increase backoff for next attempt
-          backoffMs = Math.min(backoffMs * 1.5 * (1 + 0.2 * Math.random()), 10000);
+          backoffMs = Math.min(
+            backoffMs * 1.5 * (1 + 0.2 * Math.random()),
+            10000
+          );
           retryCount++;
         } else {
           throw error;
@@ -405,7 +436,7 @@ export class RewardPoolSDK {
       }
     }
 
-    throw new Error('Failed to generate signature after multiple attempts');
+    throw new Error("Failed to generate signature after multiple attempts");
   }
 
   /**
@@ -415,23 +446,29 @@ export class RewardPoolSDK {
   /**
    * Create a new reward pool
    */
-  async createRewardPool({ name, description }: { name: string; description: string }) {
+  async createRewardPool({
+    name,
+    description,
+  }: {
+    name: string;
+    description: string;
+  }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'createRewardPool',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "createRewardPool",
       args: [name, description],
     });
 
-    console.log('Transaction sent successfully. Hash:', tx);
+    console.log("Transaction sent successfully. Hash:", tx);
 
     // Get transaction receipt to find the pool address from event
     const receipt = await this.publicClient.waitForTransactionReceipt({
       hash: tx,
     });
 
-    console.log('Transaction receipt status:', receipt.status);
-    console.log('Total logs in receipt:', receipt.logs.length);
+    console.log("Transaction receipt status:", receipt.status);
+    console.log("Total logs in receipt:", receipt.logs.length);
 
     // Log all events for debugging
     receipt.logs.forEach((log, index) => {
@@ -445,28 +482,32 @@ export class RewardPoolSDK {
     // Look for the PoolCreated event
     // Event signature: PoolCreated(uint256 indexed poolId, address indexed pool, string name, string description)
     const poolCreatedEventHash =
-      '0xaecc11792b43fbaf646e780661f7ece62df2de577db695f2afa589709709bab1';
-    const event = receipt.logs.find(log => log.topics[0] === poolCreatedEventHash);
+      "0xaecc11792b43fbaf646e780661f7ece62df2de577db695f2afa589709709bab1";
+    const event = receipt.logs.find(
+      (log) => log.topics[0] === poolCreatedEventHash
+    );
 
     if (!event) {
-      console.error('Failed to find pool creation event in transaction logs');
-      console.error('Expected event hash:', poolCreatedEventHash);
+      console.error("Failed to find pool creation event in transaction logs");
+      console.error("Expected event hash:", poolCreatedEventHash);
       console.error(
-        'Available events:',
-        receipt.logs.map(log => log.topics[0])
+        "Available events:",
+        receipt.logs.map((log) => log.topics[0])
       );
-      throw new Error('Pool creation event not found in logs');
+      throw new Error("Pool creation event not found in logs");
     }
 
     // Extract pool ID and address from event topics
     // topics[0] = event signature
     // topics[1] = poolId (indexed)
     // topics[2] = pool address (indexed)
-    const poolId = BigInt(event.topics[1] || '0');
-    const poolAddress = this.formatAddress(('0x' + event.topics[2]?.slice(26)) as Address);
+    const poolId = BigInt(event.topics[1] || "0");
+    const poolAddress = this.formatAddress(
+      ("0x" + event.topics[2]?.slice(26)) as Address
+    );
 
-    console.log('Extracted pool ID:', poolId.toString());
-    console.log('Extracted pool address:', poolAddress);
+    console.log("Extracted pool ID:", poolId.toString());
+    console.log("Extracted pool address:", poolAddress);
 
     return { tx, poolId, poolAddress };
   }
@@ -474,11 +515,19 @@ export class RewardPoolSDK {
   /**
    * Add a user to a reward pool with XP
    */
-  async addUser({ poolId, userAddress, xp }: { poolId: bigint; userAddress: Address; xp: bigint }) {
+  async addUser({
+    poolId,
+    userAddress,
+    xp,
+  }: {
+    poolId: bigint;
+    userAddress: Address;
+    xp: bigint;
+  }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'addUser',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "addUser",
       args: [poolId, this.formatAddress(userAddress), xp],
     });
 
@@ -499,8 +548,8 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'updateUserXP',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "updateUserXP",
       args: [poolId, this.formatAddress(userAddress), newXP],
     });
 
@@ -521,12 +570,136 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'penalizeUser',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "penalizeUser",
       args: [poolId, this.formatAddress(userAddress), xpToRemove],
     });
 
     return { tx };
+  }
+
+  /**
+   * Add multiple users to a pool in a single transaction (BATCH OPERATION)
+   * Gas-efficient alternative to calling addUser multiple times
+   *
+   * @param poolId - The pool ID to add users to
+   * @param users - Array of user objects with address and xp
+   * @returns Transaction hash and details
+   *
+   * @example
+   * ```typescript
+   * await sdk.batchAddUsers({
+   *   poolId: 1n,
+   *   users: [
+   *     { address: '0x123...', xp: 100n },
+   *     { address: '0x456...', xp: 200n },
+   *     { address: '0x789...', xp: 150n },
+   *   ]
+   * });
+   * ```
+   */
+  async batchAddUsers({
+    poolId,
+    users,
+  }: {
+    poolId: bigint;
+    users: { address: Address; xp: bigint }[];
+  }) {
+    const userAddresses = users.map((user) => this.formatAddress(user.address));
+    const xpAmounts = users.map((user) => user.xp);
+
+    const tx = await this.signAndSendTransaction({
+      address: this.FACTORY_ADDRESS,
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "batchAddUsers",
+      args: [poolId, userAddresses, xpAmounts],
+    });
+
+    return { tx, batchSize: users.length };
+  }
+
+  /**
+   * Update XP for multiple users in a single transaction (BATCH OPERATION)
+   * Gas-efficient alternative to calling updateUserXP multiple times
+   *
+   * @param poolId - The pool ID to update users in
+   * @param updates - Array of update objects with address and newXP
+   * @returns Transaction hash and details
+   *
+   * @example
+   * ```typescript
+   * await sdk.batchUpdateUserXP({
+   *   poolId: 1n,
+   *   updates: [
+   *     { address: '0x123...', newXP: 150n },
+   *     { address: '0x456...', newXP: 250n },
+   *     { address: '0x789...', newXP: 200n },
+   *   ]
+   * });
+   * ```
+   */
+  async batchUpdateUserXP({
+    poolId,
+    updates,
+  }: {
+    poolId: bigint;
+    updates: { address: Address; newXP: bigint }[];
+  }) {
+    const userAddresses = updates.map((update) =>
+      this.formatAddress(update.address)
+    );
+    const newXPAmounts = updates.map((update) => update.newXP);
+
+    const tx = await this.signAndSendTransaction({
+      address: this.FACTORY_ADDRESS,
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "batchUpdateUserXP",
+      args: [poolId, userAddresses, newXPAmounts],
+    });
+
+    return { tx, batchSize: updates.length };
+  }
+
+  /**
+   * Penalize multiple users in a single transaction (BATCH OPERATION)
+   * Gas-efficient alternative to calling penalizeUser multiple times
+   *
+   * @param poolId - The pool ID to penalize users in
+   * @param penalties - Array of penalty objects with address and xpToRemove
+   * @returns Transaction hash and details
+   *
+   * @example
+   * ```typescript
+   * await sdk.batchPenalizeUsers({
+   *   poolId: 1n,
+   *   penalties: [
+   *     { address: '0x123...', xpToRemove: 50n },
+   *     { address: '0x456...', xpToRemove: 25n },
+   *     { address: '0x789...', xpToRemove: 75n },
+   *   ]
+   * });
+   * ```
+   */
+  async batchPenalizeUsers({
+    poolId,
+    penalties,
+  }: {
+    poolId: bigint;
+    penalties: { address: Address; xpToRemove: bigint }[];
+  }) {
+    const userAddresses = penalties.map((penalty) =>
+      this.formatAddress(penalty.address)
+    );
+    const xpToRemove = penalties.map((penalty) => penalty.xpToRemove);
+
+    const tx = await this.signAndSendTransaction({
+      address: this.FACTORY_ADDRESS,
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "batchPenalizeUsers",
+      args: [poolId, userAddresses, xpToRemove],
+    });
+
+    return { tx, batchSize: penalties.length };
   }
 
   /**
@@ -549,8 +722,8 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'addRewards',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "addRewards",
       args: [poolId, this.formatAddress(tokenAddress), amount, tokenType],
       value: tokenType === TokenType.ERC20 ? value || amount : undefined,
       bypassSimulation,
@@ -565,8 +738,8 @@ export class RewardPoolSDK {
   async activatePool({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'activatePool',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "activatePool",
       args: [poolId],
     });
 
@@ -579,8 +752,8 @@ export class RewardPoolSDK {
   async deactivatePool({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'deactivatePool',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "deactivatePool",
       args: [poolId],
     });
 
@@ -600,8 +773,8 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'takeSnapshot',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "takeSnapshot",
       args: [poolId, tokenAddresses],
     });
 
@@ -615,8 +788,8 @@ export class RewardPoolSDK {
   async takeNativeSnapshot({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'takeNativeSnapshot',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "takeNativeSnapshot",
       args: [poolId],
     });
 
@@ -626,11 +799,17 @@ export class RewardPoolSDK {
   /**
    * Grant signer role to an address
    */
-  async grantSignerRole({ poolId, signerAddress }: { poolId: bigint; signerAddress: Address }) {
+  async grantSignerRole({
+    poolId,
+    signerAddress,
+  }: {
+    poolId: bigint;
+    signerAddress: Address;
+  }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'grantSignerRole',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "grantSignerRole",
       args: [poolId, this.formatAddress(signerAddress)],
     });
 
@@ -640,11 +819,17 @@ export class RewardPoolSDK {
   /**
    * Revoke signer role from an address
    */
-  async revokeSignerRole({ poolId, signerAddress }: { poolId: bigint; signerAddress: Address }) {
+  async revokeSignerRole({
+    poolId,
+    signerAddress,
+  }: {
+    poolId: bigint;
+    signerAddress: Address;
+  }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'revokeSignerRole',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "revokeSignerRole",
       args: [poolId, this.formatAddress(signerAddress)],
     });
 
@@ -669,9 +854,15 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'emergencyWithdraw',
-      args: [poolId, this.formatAddress(tokenAddress), this.formatAddress(to), amount, tokenType],
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "emergencyWithdraw",
+      args: [
+        poolId,
+        this.formatAddress(tokenAddress),
+        this.formatAddress(to),
+        amount,
+        tokenType,
+      ],
     });
 
     return { tx };
@@ -695,8 +886,8 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'claimReward',
+      abi: rewardpoolAbi,
+      functionName: "claimReward",
       args: [claimData, signature],
     });
 
@@ -752,17 +943,17 @@ export class RewardPoolSDK {
   async getPoolInfo({ poolId }: { poolId: bigint }): Promise<PoolInfo> {
     const result = await this.readContractWithRetry<any>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'getPoolInfo',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "getPoolInfo",
       args: [poolId],
     });
 
     // The result is an object with named properties, not an array
     if (
       result &&
-      typeof result === 'object' &&
+      typeof result === "object" &&
       result.pool &&
-      result.pool !== '0x0000000000000000000000000000000000000000'
+      result.pool !== "0x0000000000000000000000000000000000000000"
     ) {
       const poolAddress = this.formatAddress(result.pool as Address);
 
@@ -784,13 +975,13 @@ export class RewardPoolSDK {
     // If the pool address is zero, it means the pool doesn't exist
     if (
       result &&
-      typeof result === 'object' &&
-      result.pool === '0x0000000000000000000000000000000000000000'
+      typeof result === "object" &&
+      result.pool === "0x0000000000000000000000000000000000000000"
     ) {
       throw new Error(`Pool with ID ${poolId} does not exist`);
     }
 
-    throw new Error('Invalid PoolInfo data format');
+    throw new Error("Invalid PoolInfo data format");
   }
 
   /**
@@ -799,8 +990,8 @@ export class RewardPoolSDK {
   async getPoolAddress({ poolId }: { poolId: bigint }): Promise<Address> {
     return this.readContractWithRetry<Address>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'getPoolAddress',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "getPoolAddress",
       args: [poolId],
     });
   }
@@ -811,8 +1002,8 @@ export class RewardPoolSDK {
   async getPoolCount(): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 's_nextPoolId',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "s_nextPoolId",
     });
   }
 
@@ -832,9 +1023,13 @@ export class RewardPoolSDK {
   }): Promise<ClaimEligibility> {
     const result = await this.readContractWithRetry<any>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'checkClaimEligibility',
-      args: [this.formatAddress(userAddress), this.formatAddress(tokenAddress), tokenType],
+      abi: rewardpoolAbi,
+      functionName: "checkClaimEligibility",
+      args: [
+        this.formatAddress(userAddress),
+        this.formatAddress(tokenAddress),
+        tokenType,
+      ],
     });
 
     // ABI shows only 2 outputs: canClaim (bool) and allocation (uint256)
@@ -843,8 +1038,8 @@ export class RewardPoolSDK {
       const [userXP, totalXP] = await Promise.all([
         this.readContractWithRetry<bigint>({
           address: this.formatAddress(poolAddress),
-          abi: rewardPoolAbi,
-          functionName: 'getUserXP',
+          abi: rewardpoolAbi,
+          functionName: "getUserXP",
           args: [this.formatAddress(userAddress)],
         }),
         this.getTotalXP({ poolAddress }),
@@ -858,7 +1053,7 @@ export class RewardPoolSDK {
       };
     }
 
-    throw new Error('Invalid ClaimEligibility data format');
+    throw new Error("Invalid ClaimEligibility data format");
   }
 
   /**
@@ -874,14 +1069,14 @@ export class RewardPoolSDK {
     const [xp, isUser] = await Promise.all([
       this.readContractWithRetry<bigint>({
         address: this.formatAddress(poolAddress),
-        abi: rewardPoolAbi,
-        functionName: 's_userXP',
+        abi: rewardpoolAbi,
+        functionName: "s_userXP",
         args: [this.formatAddress(userAddress)],
       }),
       this.readContractWithRetry<boolean>({
         address: this.formatAddress(poolAddress),
-        abi: rewardPoolAbi,
-        functionName: 's_isUser',
+        abi: rewardpoolAbi,
+        functionName: "s_isUser",
         args: [this.formatAddress(userAddress)],
       }),
     ]);
@@ -909,9 +1104,13 @@ export class RewardPoolSDK {
   }): Promise<boolean> {
     return this.readContractWithRetry<boolean>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'hasClaimed',
-      args: [this.formatAddress(userAddress), this.formatAddress(tokenAddress), tokenType],
+      abi: rewardpoolAbi,
+      functionName: "hasClaimed",
+      args: [
+        this.formatAddress(userAddress),
+        this.formatAddress(tokenAddress),
+        tokenType,
+      ],
     });
   }
 
@@ -927,8 +1126,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'getNextNonce',
+      abi: rewardpoolAbi,
+      functionName: "getNextNonce",
       args: [this.formatAddress(userAddress)],
     });
   }
@@ -947,8 +1146,8 @@ export class RewardPoolSDK {
   }): Promise<boolean> {
     return this.readContractWithRetry<boolean>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'isNonceUsed',
+      abi: rewardpoolAbi,
+      functionName: "isNonceUsed",
       args: [this.formatAddress(userAddress), nonce],
     });
   }
@@ -965,8 +1164,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'getUserNonceCounter',
+      abi: rewardpoolAbi,
+      functionName: "getUserNonceCounter",
       args: [this.formatAddress(userAddress)],
     });
   }
@@ -985,8 +1184,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'getTotalClaimed',
+      abi: rewardpoolAbi,
+      functionName: "getTotalClaimed",
       args: [this.formatAddress(tokenAddress), tokenType],
     });
   }
@@ -1005,8 +1204,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'getAvailableRewards',
+      abi: rewardpoolAbi,
+      functionName: "getAvailableRewards",
       args: [this.formatAddress(tokenAddress), tokenType],
     });
   }
@@ -1041,16 +1240,19 @@ export class RewardPoolSDK {
           break;
         } catch (error: any) {
           const is429Error =
-            error.message?.includes('429') || error.message?.includes('rate limit');
+            error.message?.includes("429") ||
+            error.message?.includes("rate limit");
 
           if (is429Error && balanceAttempts < maxAttempts) {
             console.warn(
               `Rate limited during balance check. Retrying in ${1000 * balanceAttempts}ms...`
             );
-            await new Promise(resolve => setTimeout(resolve, 1000 * balanceAttempts));
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000 * balanceAttempts)
+            );
           } else if (balanceAttempts >= maxAttempts) {
             console.warn(
-              'Unable to get contract balance due to rate limiting. Using 0 as fallback.'
+              "Unable to get contract balance due to rate limiting. Using 0 as fallback."
             );
             contractBalance = 0n;
             break;
@@ -1060,19 +1262,27 @@ export class RewardPoolSDK {
         }
       }
 
-      const totalClaimed = await this.getTotalClaimed({ poolAddress, tokenAddress, tokenType });
+      const totalClaimed = await this.getTotalClaimed({
+        poolAddress,
+        tokenAddress,
+        tokenType,
+      });
       totalRewards = contractBalance + totalClaimed;
     } else {
       // For ERC20 tokens, use getAvailableRewards with TokenType.ERC20
       // Note: Always use TokenType.ERC20 (1) as TokenType.ERC20 (0) has known issues
       const availableRewards = await this.readContractWithRetry<bigint>({
         address: this.formatAddress(poolAddress),
-        abi: rewardPoolAbi,
-        functionName: 'getAvailableRewards',
+        abi: rewardpoolAbi,
+        functionName: "getAvailableRewards",
         args: [this.formatAddress(tokenAddress), TokenType.ERC20],
       });
 
-      const totalClaimed = await this.getTotalClaimed({ poolAddress, tokenAddress, tokenType });
+      const totalClaimed = await this.getTotalClaimed({
+        poolAddress,
+        tokenAddress,
+        tokenType,
+      });
       totalRewards = availableRewards + totalClaimed;
     }
 
@@ -1093,11 +1303,15 @@ export class RewardPoolSDK {
   /**
    * Get pool activity status
    */
-  async isPoolActive({ poolAddress }: { poolAddress: Address }): Promise<boolean> {
+  async isPoolActive({
+    poolAddress,
+  }: {
+    poolAddress: Address;
+  }): Promise<boolean> {
     return this.readContractWithRetry<boolean>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 's_active',
+      abi: rewardpoolAbi,
+      functionName: "s_active",
     });
   }
 
@@ -1107,19 +1321,23 @@ export class RewardPoolSDK {
   async getTotalXP({ poolAddress }: { poolAddress: Address }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 's_totalXP',
+      abi: rewardpoolAbi,
+      functionName: "s_totalXP",
     });
   }
 
   /**
    * Get user count in pool (using getTotalUsers)
    */
-  async getUserCount({ poolAddress }: { poolAddress: Address }): Promise<bigint> {
+  async getUserCount({
+    poolAddress,
+  }: {
+    poolAddress: Address;
+  }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
-      functionName: 'getTotalUsers',
+      abi: rewardpoolAbi,
+      functionName: "getTotalUsers",
     });
   }
 
@@ -1152,10 +1370,10 @@ export class RewardPoolSDK {
   getEIP712Types() {
     return {
       ClaimData: [
-        { name: 'user', type: 'address' },
-        { name: 'nonce', type: 'uint256' },
-        { name: 'tokenAddress', type: 'address' },
-        { name: 'tokenType', type: 'uint8' },
+        { name: "user", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "tokenAddress", type: "address" },
+        { name: "tokenType", type: "uint8" },
       ],
     };
   }
@@ -1185,7 +1403,7 @@ export class RewardPoolSDK {
       transactions.push(result);
 
       // Add delay between transactions to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     return transactions;
@@ -1206,7 +1424,7 @@ export class RewardPoolSDK {
     }[];
   }): Promise<ClaimEligibility[]> {
     const results = await Promise.all(
-      checks.map(check =>
+      checks.map((check) =>
         this.checkClaimEligibility({
           poolAddress,
           userAddress: check.userAddress,
@@ -1251,11 +1469,12 @@ export class RewardPoolSDK {
    * Check if an address has admin role
    */
   async hasAdminRole(address: Address): Promise<boolean> {
-    const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000';
+    const DEFAULT_ADMIN_ROLE =
+      "0x0000000000000000000000000000000000000000000000000000000000000000";
     return this.readContractWithRetry<boolean>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardPoolFactoryAbi, ...rewardPoolAbi],
-      functionName: 'hasRole',
+      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      functionName: "hasRole",
       args: [DEFAULT_ADMIN_ROLE, this.formatAddress(address)],
     });
   }
@@ -1281,7 +1500,7 @@ export class RewardPoolSDK {
   }): Promise<T> {
     return this.readContractWithRetry<T>({
       address: this.formatAddress(poolAddress),
-      abi: rewardPoolAbi,
+      abi: rewardpoolAbi,
       functionName,
       args,
     });
@@ -1306,13 +1525,21 @@ export class RewardPoolSDK {
   /**
    * Send ETH rewards directly to a pool contract (simpler alternative to addRewards)
    */
-  async sendETHToPool({ poolAddress, amount }: { poolAddress: Address; amount: bigint }) {
+  async sendETHToPool({
+    poolAddress,
+    amount,
+  }: {
+    poolAddress: Address;
+    amount: bigint;
+  }) {
     if (!this.walletClient.account) {
-      throw new Error('Wallet account not available');
+      throw new Error("Wallet account not available");
     }
 
     // Get the chain configuration
-    const { chain } = getContractsForChain(this.chainId).rewardPoolFactoryContract;
+    const { chain } = getContractsForChain(
+      this.chainId
+    ).rewardPoolFactoryContract;
 
     // Send ETH directly to the pool contract
     const hash = await this.walletClient.sendTransaction({
@@ -1328,11 +1555,15 @@ export class RewardPoolSDK {
   /**
    * Check if a pool has taken a snapshot
    */
-  async isSnapshotTaken({ poolAddress }: { poolAddress: Address }): Promise<boolean> {
+  async isSnapshotTaken({
+    poolAddress,
+  }: {
+    poolAddress: Address;
+  }): Promise<boolean> {
     return this.readContractWithRetry<boolean>({
       address: poolAddress,
-      abi: rewardPoolAbi,
-      functionName: 's_snapshotTaken',
+      abi: rewardpoolAbi,
+      functionName: "s_snapshotTaken",
       args: [],
     });
   }
@@ -1351,8 +1582,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: poolAddress,
-      abi: rewardPoolAbi,
-      functionName: 'getSnapshotAmount',
+      abi: rewardpoolAbi,
+      functionName: "getSnapshotAmount",
       args: [this.formatAddress(tokenAddress), tokenType],
     });
   }
@@ -1371,8 +1602,8 @@ export class RewardPoolSDK {
   }): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: poolAddress,
-      abi: rewardPoolAbi,
-      functionName: 'getTotalRewards',
+      abi: rewardpoolAbi,
+      functionName: "getTotalRewards",
       args: [this.formatAddress(tokenAddress), tokenType],
     });
   }

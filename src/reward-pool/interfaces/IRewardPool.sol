@@ -6,8 +6,8 @@ pragma solidity 0.8.26;
 interface IRewardPool {
     /// @notice Token types supported by RewardPool
     enum TokenType {
-        ERC20,   // 0 - ERC20 tokens
-        NATIVE   // 1 - Native ETH
+        ERC20, // 0 - ERC20 tokens
+        NATIVE // 1 - Native ETH
     }
 
     /// @notice Claim data structure for EIP-712 signatures
@@ -41,6 +41,20 @@ interface IRewardPool {
     function grantSignerRole(address signer) external;
     function revokeSignerRole(address signer) external;
 
+    // ===== BATCH ADMIN FUNCTIONS (Factory Only) =====
+    function batchAddUsers(
+        address[] calldata users,
+        uint256[] calldata xpAmounts
+    ) external;
+    function batchUpdateUserXP(
+        address[] calldata users,
+        uint256[] calldata newXPAmounts
+    ) external;
+    function batchPenalizeUsers(
+        address[] calldata users,
+        uint256[] calldata xpToRemove
+    ) external;
+
     function takeSnapshot(address[] calldata tokenAddresses) external;
     function takeNativeSnapshot() external;
     function emergencyWithdraw(
@@ -51,40 +65,48 @@ interface IRewardPool {
     ) external;
 
     // ===== PUBLIC FUNCTIONS =====
-    function checkClaimEligibility(address user, address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (bool canClaim, uint256 allocation);
+    function checkClaimEligibility(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool canClaim, uint256 allocation);
 
-    function claimReward(ClaimData calldata data, bytes calldata signature) external;
+    function claimReward(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external;
 
     // ===== VIEW FUNCTIONS =====
     function getUserXP(address user) external view returns (uint256);
     function isUser(address user) external view returns (bool);
     function getTotalUsers() external view returns (uint256);
     function getUserAtIndex(uint256 index) external view returns (address);
-    function hasClaimed(address user, address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (bool);
-    function getTotalClaimed(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256);
-    function getAvailableRewards(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256);
-    function getSnapshotAmount(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256);
-    function getTotalRewards(address tokenAddress, TokenType tokenType)
-        external
-        view
-        returns (uint256);
+    function hasClaimed(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool);
+    function getTotalClaimed(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
+    function getAvailableRewards(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
+    function getSnapshotAmount(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
+    function getTotalRewards(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
     function getUserNonceCounter(address user) external view returns (uint256);
-    function isNonceUsed(address user, uint256 nonce) external view returns (bool);
+    function isNonceUsed(
+        address user,
+        uint256 nonce
+    ) external view returns (bool);
     function getNextNonce(address user) external view returns (uint256);
     function s_active() external view returns (bool);
     function s_totalXP() external view returns (uint256);
@@ -105,5 +127,27 @@ interface IRewardPool {
         uint256 totalXP
     );
 
-    event SnapshotTaken(uint256 nativeAmount, address[] tokens, uint256[] tokenAmounts);
+    // ===== BATCH EVENTS =====
+    event BatchUsersAdded(
+        address[] users,
+        uint256[] xpAmounts,
+        uint256 batchSize
+    );
+    event BatchUsersUpdated(
+        address[] users,
+        uint256[] oldXP,
+        uint256[] newXP,
+        uint256 batchSize
+    );
+    event BatchUsersPenalized(
+        address[] users,
+        uint256[] xpRemoved,
+        uint256 batchSize
+    );
+
+    event SnapshotTaken(
+        uint256 nativeAmount,
+        address[] tokens,
+        uint256[] tokenAmounts
+    );
 }
