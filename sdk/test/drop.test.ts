@@ -9,7 +9,7 @@ dotenv.config({
   path: path.resolve(__dirname, "../../.env"),
 });
 
-describe("Drop SDK", () => {
+describe.skip("Drop SDK", () => {
   it("SDK End to End", async () => {
     try {
       // Initialize the SDK

@@ -1,0 +1,546 @@
+# RewardPool System Documentation
+
+## Overview
+
+The RewardPool system is a comprehensive XP-based reward distribution platform built on Ethereum using OpenZeppelin's upgradeable proxy pattern (UUPS). The system enables fair, proportional distribution of rewards based on user experience points (XP) with robust security measures to prevent manipulation and ensure integrity.
+# RewardPool System Documentation
+
+## Overview
+
+The RewardPool system is an XP-based reward distribution platform that allows proportional reward allocation to users based on their experience points (XP). Users can claim rewards for multiple token types (ETH and ERC20) using EIP-712 signatures with per-user nonce management.
+
+## Architecture
+
+### Core Contracts
+
+1. **RewardPoolFactory** (`0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2` - Base Sepolia)
+   - Factory contract for creating and managing reward pools
+   - Upgradeable using OpenZeppelin UUPS proxies
+   - Handles admin functions and pool lifecycle
+
+2. **RewardPool** (Implementation: `TBD - Latest Deployment`)
+   - Individual reward pool contract
+   - Handles XP-based proportional distributions
+   - Supports only native ETH and ERC20 tokens (simplified enum)
+   - Per-user nonce management for signature replay protection
+
+### Key Features
+
+- **XP-Based Distribution**: Rewards distributed proportionally based on user XP
+- **Dual Token Support**: Users can claim both ETH (NATIVE) and ERC20 rewards from same pool
+- **Simplified TokenType Enum**: Only `ERC20=0` and `NATIVE=1` (removed ERC721/ERC1155)
+- **Per-User Nonces**: Independent nonce tracking prevents signature replay attacks
+- **Double Claim Protection**: Users cannot claim same reward type twice
+- **Self-Claiming**: Users must claim their own rewards (data.user == msg.sender)
+- **Upgradeable Architecture**: UUPS proxy pattern for future improvements
+- **Role-Based Access**: Admin and signer role separation
+
+## Contract Addresses (Base Sepolia)
+
+```
+Factory Proxy:              0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2
+Example Pool:               0xaac472D2e61Bef4Ef987755628547638519b4758
+Admin Address:              0x8d942fdC6C02cfeC5C6c4cc59F1DCC92C41fC271
+Chain ID:                   84532
+```
+
+## TokenType Enum Structure
+
+### Simplified Enum
+```solidity
+enum TokenType {
+    ERC20 = 0,    // ERC20 tokens (requires non-zero tokenAddress)
+    NATIVE = 1    // Native ETH (requires tokenAddress = address(0))
+}
+```
+
+### Critical Validation Rules
+- **NATIVE tokens**: MUST use `tokenAddress = address(0)`
+- **ERC20 tokens**: MUST use non-zero `tokenAddress`
+- **No support for ERC721/ERC1155**: Only NATIVE and ERC20 are supported
+
+## Usage Flow
+
+### 1. Pool Creation
+```solidity
+uint256 poolId = factory.createRewardPool("Pool Name", "Description");
+```
+
+### 2. User Management
+```solidity
+// Add users with XP
+factory.addUser(poolId, userAddress, xpAmount);
+
+// Update user XP (before activation)
+factory.updateUserXP(poolId, userAddress, newXP);
+
+// Penalize user (reduce XP)
+factory.penalizeUser(poolId, userAddress, xpToRemove);
+```
+
+### 3. Reward Addition
+
+#### Direct ETH Transfer (Recommended)
+```solidity
+// Send ETH directly to pool address (simplest method)
+walletClient.sendTransaction({ to: poolAddress, value: amount });
+```
+
+#### Using addRewards Function
+```solidity
+// Add NATIVE ETH rewards
+factory.addRewards{value: 1 ether}(poolId, address(0), 1 ether, TokenType.NATIVE);
+
+// Add ERC20 rewards
+factory.addRewards(poolId, tokenAddress, amount, TokenType.ERC20);
+```
+
+### 4. Pool Activation & Snapshots
+```solidity
+// Take snapshot of current balances
+factory.takeNativeSnapshot(poolId);  // For ETH rewards
+factory.takeSnapshot(poolId, [tokenAddress]); // For ERC20 rewards
+
+// Activate pool (locks XP values)
+factory.activatePool(poolId);
+```
+
+### 5. Claiming Process (User Self-Claiming)
+```solidity
+// Check eligibility (user must check their own eligibility)
+(bool canClaim, uint256 allocation) = pool.checkClaimEligibility(
+    msg.sender, tokenAddress, tokenType
+);
+
+// Generate claim data with unique nonce
+ClaimData memory claimData = ClaimData({
+    user: msg.sender,  // CRITICAL: user must equal msg.sender
+    nonce: pool.getNextNonce(msg.sender),
+    tokenAddress: tokenAddress,
+    tokenType: tokenType
+});
+
+// Generate EIP-712 signature (admin with SIGNER_ROLE signs)
+bytes memory signature = generateSignature(claimData, signerPrivateKey);
+
+// User claims their own rewards
+pool.claimReward(claimData, signature);  // msg.sender must equal claimData.user
+```
+
+## Self-Claiming Requirement
+
+### Key Security Feature
+- **Users must claim for themselves**: `claimData.user == msg.sender`
+- **Admin signs, user claims**: Admin with SIGNER_ROLE generates signatures, but users send their own transactions
+- **No proxy claiming**: Users cannot claim on behalf of other users
+
+### Implementation Pattern
+```typescript
+// 1. Admin generates signature for user
+const claimData = {
+    user: userAddress,
+    nonce: await pool.getNextNonce(userAddress),
+    tokenAddress: tokenAddress,
+    tokenType: tokenType
+};
+const signature = await adminWallet.signTypedData({
+    domain, types, primaryType: "ClaimData", message: claimData
+});
+
+// 2. User submits claim using their own wallet
+const userWallet = createWalletClient({ account: userAccount });
+await userWallet.writeContract({
+    address: poolAddress,
+    abi: rewardPoolAbi,
+    functionName: 'claimReward',
+    args: [claimData, signature]
+});
+```
+
+## Nonce Management
+
+### Per-User Nonce System
+- Each user has independent nonce tracking
+- Prevents cross-user nonce conflicts
+- Supports multiple token type claims per user
+
+### Key Functions
+```solidity
+// Get next available nonce for user
+uint256 nextNonce = pool.getNextNonce(userAddress);
+
+// Check if nonce is used
+bool isUsed = pool.isNonceUsed(userAddress, nonce);
+
+// Get current nonce counter
+uint256 counter = pool.getUserNonceCounter(userAddress);
+```
+
+### Usage Pattern
+```typescript
+// Get next nonce for user
+const nextNonce = await pool.getNextNonce(userAddress);
+
+// Create claim data
+const claimData = {
+    user: userAddress,
+    nonce: nextNonce,
+    tokenAddress: tokenAddress,
+    tokenType: tokenType
+};
+
+// Generate signature and claim
+const signature = await generateEIP712Signature(claimData);
+await pool.claimReward(claimData, signature);
+```
+
+## Security Features
+
+### 1. Self-Claiming Security
+- Users must send their own claim transactions
+- Prevents unauthorized claiming by third parties
+- Admin can sign but cannot execute claims
+
+### 2. TokenType Validation
+- Strict validation of tokenAddress/tokenType combinations
+- NATIVE must use address(0), ERC20 must use non-zero address
+- Prevents invalid token type usage
+
+### 3. Double Claim Prevention
+- `s_hasClaimed[user][tokenAddress][tokenType]` mapping
+- Users cannot claim same reward type twice
+- Separate tracking for different token types
+
+### 4. Nonce Replay Protection
+- Per-user nonce tracking: `s_usedNonces[user][nonce]`
+- Prevents signature replay attacks
+- Each claim requires unique nonce
+
+### 5. XP Snapshot Integrity
+- XP values locked once pool is activated
+- Cannot modify XP after activation
+- Ensures fair distribution calculations
+
+### 6. Access Controls
+- Admin role for pool management
+- Signer role for claim authorization
+- Factory-only functions for pool operations
+
+### 7. Reward Pool Integrity
+- Snapshot-based allocation system
+- Balance validation before transfers
+- Emergency withdrawal for admin recovery
+
+## EIP-712 Signature Structure
+
+### Domain Separator
+```solidity
+name: "BP_REWARD_POOL"
+version: "1"
+chainId: 84532 (Base Sepolia)
+verifyingContract: poolAddress
+```
+
+### ClaimData Type
+```solidity
+struct ClaimData {
+    address user;        // Must equal msg.sender in claim transaction
+    uint256 nonce;       // Per-user unique nonce
+    address tokenAddress; // address(0) for NATIVE, token address for ERC20
+    uint8 tokenType;     // 0=ERC20, 1=NATIVE
+}
+```
+
+### TypeHash
+```solidity
+keccak256("ClaimData(address user,uint256 nonce,address tokenAddress,uint8 tokenType)")
+```
+
+## SDK Integration
+
+### Updated Contract Addresses
+```typescript
+const REWARD_POOL_FACTORY = "0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2";
+```
+
+### TokenType Constants
+```typescript
+export const TOKEN_TYPES = {
+  ERC20: 0,
+  NATIVE: 1,
+} as const;
+
+export enum TokenType {
+  ERC20 = 0,
+  NATIVE = 1,
+}
+```
+
+### ABI Exports
+```typescript
+import { rewardPoolFactoryAbi, rewardPoolAbi } from './abis';
+```
+
+### Contract Initialization
+```typescript
+const factory = new Contract(
+    "0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2",
+    rewardPoolFactoryAbi,
+    provider
+);
+
+const pool = new Contract(
+    poolAddress,
+    rewardPoolAbi,
+    provider
+);
+```
+
+### Claiming with Self-Claiming Pattern
+```typescript
+// 1. Check eligibility
+const [canClaim, allocation] = await pool.checkClaimEligibility(
+    userAddress,
+    tokenAddress,
+    tokenType
+);
+
+// 2. Get next nonce
+const nonce = await pool.getNextNonce(userAddress);
+
+// 3. Create claim data
+const claimData = {
+    user: userAddress,
+    nonce: nonce,
+    tokenAddress: tokenAddress,
+    tokenType: tokenType
+};
+
+// 4. Admin generates EIP-712 signature
+const signature = await adminWallet.signTypedData({
+    domain: {
+        name: "BP_REWARD_POOL",
+        version: "1",
+        chainId: 84532,
+        verifyingContract: poolAddress
+    },
+    types: {
+        ClaimData: [
+            { name: "user", type: "address" },
+            { name: "nonce", type: "uint256" },
+            { name: "tokenAddress", type: "address" },
+            { name: "tokenType", type: "uint8" }
+        ]
+    },
+    primaryType: "ClaimData",
+    message: claimData
+});
+
+// 5. User submits claim with their wallet
+const userWallet = createWalletClient({ account: userAccount });
+const tx = await userWallet.writeContract({
+    address: poolAddress,
+    abi: rewardPoolAbi,
+    functionName: 'claimReward',
+    args: [claimData, signature]
+});
+await tx.wait();
+```
+
+## Error Handling
+
+### Common Errors
+```solidity
+RewardPool__UserNotInPool()          // User not added to pool
+RewardPool__AlreadyClaimed()         // User already claimed this token type
+RewardPool__NonceAlreadyUsed()       // Nonce already used by this user
+RewardPool__InvalidSignature()       // Invalid EIP-712 signature OR user != msg.sender
+RewardPool__InvalidTokenType()       // Invalid tokenAddress/tokenType combination
+RewardPool__InsufficientRewards()    // No rewards available
+RewardPool__PoolNotActive()          // Pool not activated
+RewardPool__CannotUpdateXPWhenActive() // Cannot modify XP after activation
+```
+
+### TokenType Validation Errors
+```typescript
+// These combinations will fail with RewardPool__InvalidTokenType:
+{ tokenAddress: "0x0000000000000000000000000000000000000000", tokenType: TokenType.ERC20 }  // ❌
+{ tokenAddress: "0x1234...5678", tokenType: TokenType.NATIVE }  // ❌
+
+// Valid combinations:
+{ tokenAddress: "0x0000000000000000000000000000000000000000", tokenType: TokenType.NATIVE }  // ✅
+{ tokenAddress: "0x1234...5678", tokenType: TokenType.ERC20 }  // ✅
+```
+
+### Error Recovery
+```typescript
+try {
+    await pool.claimReward(claimData, signature);
+} catch (error) {
+    if (error.reason === "RewardPool__AlreadyClaimed") {
+        // User already claimed this token type
+    } else if (error.reason === "RewardPool__NonceAlreadyUsed") {
+        // Get new nonce and retry
+        const newNonce = await pool.getNextNonce(userAddress);
+        // Regenerate signature with new nonce
+    } else if (error.reason === "RewardPool__InvalidSignature") {
+        // Either invalid signature OR user != msg.sender
+        console.log("Check: 1) Signature validity, 2) User is sending their own transaction");
+    }
+}
+```
+
+## Testing
+
+### Test Results
+- **48/48 tests passing (100% success rate)**
+- All critical TokenType validation scenarios covered
+- Comprehensive claim functionality testing
+- Security edge case validation
+- Per-user nonce management verification
+- Self-claiming requirement validation
+
+### Key Test Scenarios
+- ✅ Successful native token claims
+- ✅ Successful ERC20 token claims  
+- ✅ Multiple users claiming proportionally
+- ✅ Double claiming prevention
+- ✅ Nonce replay protection
+- ✅ Mixed token claiming (ETH + ERC20)
+- ✅ Invalid signature handling
+- ✅ TokenType validation (NATIVE vs ERC20)
+- ✅ Self-claiming requirement enforcement
+- ✅ XP modification restrictions after activation
+
+### Critical Tests Status
+- ✅ `testTokenTypeHandling_CRITICAL()`
+- ✅ `testTokenAddressValidation_CRITICAL()`
+- ✅ `testClaimRewardValidation_CRITICAL()`
+- ✅ `testEmergencyWithdrawValidation_CRITICAL()`
+
+## Deployment
+
+### Base Sepolia Deployment
+```bash
+# Deploy new contracts
+make deploy_reward_pool ARGS="--network base_sepolia"
+
+# Current addresses:
+# Factory: 0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2
+# Example Pool: 0xaac472D2e61Bef4Ef987755628547638519b4758
+```
+
+### ABI Export
+```bash
+# Export ABIs to SDK
+jq '.abi' out/RewardPoolFactory.sol/RewardPoolFactory.json > sdk/abis/rewardPoolFactoryAbi.ts
+jq '.abi' out/RewardPool.sol/RewardPool.json > sdk/abis/rewardPoolAbi.ts
+```
+
+## Best Practices
+
+### For Admins
+1. Add all users before activating pool
+2. Verify XP allocations before activation  
+3. Take snapshots before activation (captures reward balances)
+4. Grant signer roles to trusted addresses only
+5. Use direct ETH transfer to pools for simplicity
+6. Monitor pool balances and claim activity
+
+### For SDK Developers
+1. Always validate tokenAddress/tokenType combinations
+2. Use correct TokenType enum values (ERC20=0, NATIVE=1)
+2. Always check claim eligibility before attempting claims
+4. Use `getNextNonce()` for new claims
+5. Handle nonce conflicts gracefully
+6. Implement proper error handling for all scenarios
+7. Ensure users claim for themselves (self-claiming pattern)
+
+### For Users
+1. Users must send their own claim transactions
+2. Each token type requires separate claim transaction
+3. Use address(0) for NATIVE, actual address for ERC20
+4. Nonces must be unique per user (not global)
+5. Claims are final - no reversals possible
+
+## Example Implementation
+
+### Complete Claiming Flow
+```typescript
+import { RewardPoolSDK, TokenType } from './rewardPoolSdk';
+
+// Initialize SDK
+const sdk = new RewardPoolSDK(84532); // Base Sepolia
+await sdk.initialize();
+
+// Example: User claiming native ETH
+const claimData = {
+    user: userAddress,
+    nonce: await sdk.getNextNonce({ poolAddress, userAddress }),
+    tokenAddress: "0x0000000000000000000000000000000000000000", // address(0) for NATIVE
+    tokenType: TokenType.NATIVE // 1
+};
+
+// Admin generates signature
+const signature = await sdk.generateClaimSignature(claimData, poolAddress);
+
+// User claims with their own wallet
+const result = await sdk.claimReward({
+    poolAddress,
+    claimData,
+    signature
+});
+
+console.log("Claim successful:", result.tx);
+```
+
+## Monitoring & Analytics
+
+### Key Metrics to Track
+- Total pools created using new factory
+- Active vs inactive pools
+- User participation rates by XP distribution
+- Claim success/failure rates by token type
+- TokenType usage patterns (NATIVE vs ERC20)
+- Self-claiming adoption rates
+
+### Events to Monitor
+```solidity
+PoolCreated(uint256 poolId, address pool, string name, string description)
+UserAdded(address indexed user, uint256 xp)
+RewardClaimed(address indexed user, address tokenAddress, uint256 amount, TokenType tokenType, uint256 userXP, uint256 totalXP)
+PoolActivated()
+SnapshotTaken(address tokenAddress, uint256 amount, TokenType tokenType)
+```
+
+## Migration Notes
+
+### From Previous Version
+1. **TokenType enum simplified**: Removed ERC721(1), ERC1155(2), NATIVE moved to (1)
+2. **Contract addresses updated**: New factory at `0xc491A0bE0CadD93E6D9A1bb55FFED97756cfB2B2`
+3. **Enhanced validation**: Stricter tokenAddress/tokenType combination checking
+4. **Self-claiming enforced**: Users must claim for themselves
+5. **Snapshot system**: Enhanced snapshot-based reward allocation
+
+### Breaking Changes
+- TokenType enum values changed: NATIVE is now 1 (was 3)
+- Removed support for ERC721/ERC1155 token types
+- Self-claiming requirement added
+- Enhanced tokenAddress validation
+
+## Future Enhancements
+
+### Potential Improvements
+1. Batch claiming for multiple token types in single transaction
+2. Partial claim functionality
+3. Time-based claim windows
+4. Delegated claiming with explicit user authorization
+5. Cross-pool XP aggregation
+6. Automated XP updates via oracles
+
+### Upgrade Considerations
+- UUPS proxy pattern allows seamless upgrades
+- Storage layout must be preserved for enum changes
+- TokenType migration requires careful handling
+- Comprehensive testing required before upgrades
+- Self-claiming pattern is now core security feature

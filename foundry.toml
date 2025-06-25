@@ -4,7 +4,7 @@ out = "out"
 libs = ["lib"]
 solc_version = "0.8.26"
 optimizer = true
-optimizer_runs = 10000
+optimizer_runs = 2000
 # NOTE: viaIR doesn't work with `forge coverage`
 viaIR = true
 build_info = true
