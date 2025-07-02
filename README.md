@@ -14,6 +14,7 @@
 This repository contains upgradeable smart contracts that power the Blueprint NFT ecosystem. The contracts include:
 
 - **BlueprintERC1155Factory** – A factory contract for deploying and managing ERC1155 NFT collections, enabling NFT drops with configurable fees and royalties.
+- **RewardPoolFactory** – A factory contract for deploying and managing XP-based reward pools with batch operations for efficient user management.
 
 ---
 
@@ -22,6 +23,7 @@ This repository contains upgradeable smart contracts that power the Blueprint NF
 - [Overview](#overview)
 - [Smart Contract Details](#smart-contract-details)
   - [BlueprintERC1155Factory](#blueprinterc1155factory)
+  - [RewardPoolFactory](#rewardpoolfactory)
 - [Setup and Installation](#setup-and-installation)
 - [Deployment](#deployment)
 - [Testing](#testing)
@@ -50,6 +52,21 @@ Blueprint's smart contract suite enables NFT collection management and drop func
   - Supports creating and managing drops with start/end times.
   - Access control for admin and creator roles.
 - **File:** [BlueprintERC1155Factory.sol](./src/nft/BlueprintERC1155Factory.sol)
+
+### RewardPoolFactory
+
+- **Purpose:**  
+  Factory contract for deploying and managing XP-based reward pools with efficient batch operations for large-scale user management.
+- **Key Features:**
+  - Upgradeable factory pattern using UUPS proxy.
+  - Batch operations for adding, updating, and penalizing users (optimized for 10k+ users).
+  - XP-based reward system with pool activation controls.
+  - Role-based access control for admins and signers.
+  - Gas-optimized operations with ~72-77k gas per user in batch operations.
+  - Comprehensive validation and atomic operation guarantees.
+- **Files:**
+  - [RewardPoolFactory.sol](./src/reward-pool/RewardPoolFactory.sol)
+  - [RewardPool.sol](./src/reward-pool/RewardPool.sol)
 
 ---
 
@@ -85,6 +102,12 @@ The contracts are designed for upgradeability and can be deployed using Forge sc
 make deploy_nft_factory ARGS="--network base_sepolia"
 ```
 
+### Deploy RewardPool Factory
+
+```bash
+make deploy_reward_pool ARGS="--network base_sepolia"
+```
+
 ### Deploy on Zero Network
 
 For Zero Network deployments, you'll need the foundry-zksync fork:
@@ -94,13 +117,19 @@ make install-foundry-zksync
 make deploy_nft_factory_zero ARGS="--network zero"
 ```
 
-### Upgrade NFT Factory
+### Upgrade Contracts
 
 ```bash
+# Upgrade NFT Factory
 make upgrade_nft_factory ARGS="--network base_sepolia"
+
+# Upgrade RewardPool Factory
+make upgrade_reward_pool ARGS="--network base_sepolia"
 ```
 
 ### Verification
+
+#### NFT Contracts
 
 For ERC1155 implementation contracts:
 
@@ -114,10 +143,38 @@ For factory implementation contracts:
 make verify_blueprint_factory_implementation_base_sepolia
 ```
 
+#### RewardPool Contracts
+
+Verify all RewardPool contracts (recommended):
+
+```bash
+# For Base Sepolia
+make verify_reward_pool NETWORK=base_sepolia
+
+# For Base Mainnet
+make verify_reward_pool NETWORK=base
+```
+
+Verify individual RewardPool contracts:
+
+```bash
+# RewardPool implementation
+make verify_reward_pool_impl NETWORK=base_sepolia
+
+# RewardPoolFactory implementation
+make verify_reward_pool_factory_impl NETWORK=base_sepolia
+
+# RewardPoolFactory proxy (main contract)
+make verify_reward_pool_proxy NETWORK=base_sepolia
+```
+
+#### Custom Contract Verification
+
 For custom contract verification:
 
 ```bash
 make verify_base_sepolia ADDRESS=0x... CONTRACT=src/nft/BlueprintERC1155.sol:BlueprintERC1155
+make verify_base ADDRESS=0x... CONTRACT=src/reward-pool/RewardPool.sol:RewardPool
 ```
 
 For local development with Anvil:
@@ -142,11 +199,20 @@ Run the complete test suite with:
 make test
 ```
 
+Run RewardPool tests specifically:
+
+```bash
+make test-reward-pool
+```
+
 Or directly with Forge:
 
 ```bash
 forge install
 forge test
+
+# Test specific contract
+forge test --match-contract RewardPoolTest
 ```
 
 ---

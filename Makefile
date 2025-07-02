@@ -147,6 +147,99 @@ verify_blueprint_factory_implementation_base_sepolia:
 		--rpc-url $(BASE_SEPOLIA_RPC) \
 		--watch
 
+# Unified verification commands that support both networks
+verify_reward_pool:
+	@if [ -z "$(NETWORK)" ]; then \
+		echo "Usage: make verify_reward_pool NETWORK=base|base_sepolia"; \
+		echo "Example: make verify_reward_pool NETWORK=base_sepolia"; \
+		exit 1; \
+	fi
+	@if [ "$(NETWORK)" = "base" ]; then \
+		echo "Verifying RewardPool contracts on Base Mainnet..."; \
+		echo "Verifying RewardPool implementation..."; \
+		forge verify-contract $(BASE_REWARD_POOL_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPool.sol:RewardPool" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC); \
+		echo "Waiting 10 seconds..."; \
+		sleep 10; \
+		echo "Verifying RewardPoolFactory implementation..."; \
+		forge verify-contract $(BASE_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPoolFactory.sol:RewardPoolFactory" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC); \
+		echo "Waiting 10 seconds..."; \
+		sleep 10; \
+		echo "Verifying RewardPoolFactory proxy..."; \
+		forge verify-contract $(BASE_REWARD_POOL_FACTORY_PROXY_ADDRESS) "lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC) --constructor-args $(shell cast abi-encode "constructor(address,bytes)" $(BASE_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) $(shell cast calldata "initialize(address,address)" $(DEPLOYER_ADDRESS) $(BASE_REWARD_POOL_IMPLEMENTATION_ADDRESS))); \
+		echo "All RewardPool contracts verified on Base Mainnet!"; \
+	elif [ "$(NETWORK)" = "base_sepolia" ]; then \
+		echo "Verifying RewardPool contracts on Base Sepolia..."; \
+		echo "Verifying RewardPool implementation..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPool.sol:RewardPool" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC); \
+		echo "Waiting 10 seconds..."; \
+		sleep 10; \
+		echo "Verifying RewardPoolFactory implementation..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPoolFactory.sol:RewardPoolFactory" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC); \
+		echo "Waiting 10 seconds..."; \
+		sleep 10; \
+		echo "Verifying RewardPoolFactory proxy..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_FACTORY_PROXY_ADDRESS) "lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC) --constructor-args $(shell cast abi-encode "constructor(address,bytes)" $(BASE_SEPOLIA_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) $(shell cast calldata "initialize(address,address)" $(DEPLOYER_ADDRESS) $(BASE_SEPOLIA_REWARD_POOL_IMPLEMENTATION_ADDRESS))); \
+		echo "All RewardPool contracts verified on Base Sepolia!"; \
+	else \
+		echo "Error: Invalid network '$(NETWORK)'. Use 'base' or 'base_sepolia'"; \
+		exit 1; \
+	fi
+
+# Individual unified commands
+verify_reward_pool_impl:
+	@if [ -z "$(NETWORK)" ]; then \
+		echo "Usage: make verify_reward_pool_impl NETWORK=base|base_sepolia"; \
+		exit 1; \
+	fi
+	@if [ "$(NETWORK)" = "base" ]; then \
+		echo "Verifying RewardPool implementation on Base Mainnet..."; \
+		forge verify-contract $(BASE_REWARD_POOL_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPool.sol:RewardPool" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC); \
+		echo "Verification submitted. Check status on Basescan."; \
+	elif [ "$(NETWORK)" = "base_sepolia" ]; then \
+		echo "Verifying RewardPool implementation on Base Sepolia..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPool.sol:RewardPool" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC); \
+		echo "Verification submitted. Check status on Basescan."; \
+	else \
+		echo "Error: Invalid network '$(NETWORK)'. Use 'base' or 'base_sepolia'"; \
+		exit 1; \
+	fi
+
+verify_reward_pool_factory_impl:
+	@if [ -z "$(NETWORK)" ]; then \
+		echo "Usage: make verify_reward_pool_factory_impl NETWORK=base|base_sepolia"; \
+		exit 1; \
+	fi
+	@if [ "$(NETWORK)" = "base" ]; then \
+		echo "Verifying RewardPoolFactory implementation on Base Mainnet..."; \
+		forge verify-contract $(BASE_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPoolFactory.sol:RewardPoolFactory" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC); \
+		echo "Verification submitted. Check status on Basescan."; \
+	elif [ "$(NETWORK)" = "base_sepolia" ]; then \
+		echo "Verifying RewardPoolFactory implementation on Base Sepolia..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) "src/reward-pool/RewardPoolFactory.sol:RewardPoolFactory" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC); \
+		echo "Verification submitted. Check status on Basescan."; \
+	else \
+		echo "Error: Invalid network '$(NETWORK)'. Use 'base' or 'base_sepolia'"; \
+		exit 1; \
+	fi
+
+verify_reward_pool_proxy:
+	@if [ -z "$(NETWORK)" ]; then \
+		echo "Usage: make verify_reward_pool_proxy NETWORK=base|base_sepolia"; \
+		exit 1; \
+	fi
+	@if [ "$(NETWORK)" = "base" ]; then \
+		echo "Verifying RewardPoolFactory proxy on Base Mainnet..."; \
+		forge verify-contract $(BASE_REWARD_POOL_FACTORY_PROXY_ADDRESS) "lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy" --chain-id 8453 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_MAINNET_RPC) --constructor-args $(shell cast abi-encode "constructor(address,bytes)" $(BASE_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) $(shell cast calldata "initialize(address,address)" $(DEPLOYER_ADDRESS) $(BASE_REWARD_POOL_IMPLEMENTATION_ADDRESS))); \
+		echo "Verification submitted. Check status on Basescan."; \
+	elif [ "$(NETWORK)" = "base_sepolia" ]; then \
+		echo "Verifying RewardPoolFactory proxy on Base Sepolia..."; \
+		forge verify-contract $(BASE_SEPOLIA_REWARD_POOL_FACTORY_PROXY_ADDRESS) "lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy" --chain-id 84532 --etherscan-api-key $(BASESCAN_API_KEY) --rpc-url $(BASE_SEPOLIA_RPC) --constructor-args $(shell cast abi-encode "constructor(address,bytes)" $(BASE_SEPOLIA_REWARD_POOL_FACTORY_IMPLEMENTATION_ADDRESS) $(shell cast calldata "initialize(address,address)" $(DEPLOYER_ADDRESS) $(BASE_SEPOLIA_REWARD_POOL_IMPLEMENTATION_ADDRESS))); \
+		echo "Verification submitted. Check status on Basescan."; \
+	else \
+		echo "Error: Invalid network '$(NETWORK)'. Use 'base' or 'base_sepolia'"; \
+		exit 1; \
+	fi
+
 verify_base_sepolia:
 	@if [ -z "${ADDRESS}" ] || [ -z "${CONTRACT}" ]; then \
 		echo "Usage: make verify_base_sepolia ADDRESS=0x... CONTRACT=path:Name"; \
