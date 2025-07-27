@@ -2,7 +2,8 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-solc_version = "0.8.26"
+evm_version = "prague"
+solc_version = "0.8.28"
 optimizer = true
 optimizer_runs = 2000
 # NOTE: viaIR doesn't work with `forge coverage`

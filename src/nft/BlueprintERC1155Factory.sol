@@ -7,7 +7,7 @@ __________.__                             .__        __
  |______  /____/____/  \___  >   __/|__|  |__|___|  /__|  
         \/                 \/|__|                 \/      
 */
-pragma solidity 0.8.26;
+pragma solidity 0.8.28;
 
 import "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
@@ -372,6 +372,174 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
         BlueprintERC1155(collection).setDropActive(tokenId, active);
 
         emit CollectionUpdated(collection, "setDropActive");
+    }
+
+    /**
+     * @dev Creates a new drop with auto-incremented token ID and ERC20 support
+     * @param collection Address of the collection
+     * @param price ETH price in wei
+     * @param erc20Price ERC20 price in token units
+     * @param acceptedERC20 ERC20 token address
+     * @param startTime Start time timestamp
+     * @param endTime End time timestamp
+     * @param active Whether the drop is active
+     * @param ethEnabled Whether ETH payments are enabled
+     * @param erc20Enabled Whether ERC20 payments are enabled
+     * @return tokenId The newly created drop's token ID
+     */
+    function createNewDropWithERC20(
+        address collection,
+        uint256 price,
+        uint256 erc20Price,
+        address acceptedERC20,
+        uint256 startTime,
+        uint256 endTime,
+        bool active,
+        bool ethEnabled,
+        bool erc20Enabled
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        uint256 tokenId = BlueprintERC1155(collection).createDropWithERC20(
+            price, erc20Price, acceptedERC20, startTime, endTime, active, ethEnabled, erc20Enabled
+        );
+
+        emit CollectionUpdated(collection, "createDropWithERC20");
+        return tokenId;
+    }
+
+    /**
+     * @dev Creates or updates a drop with ERC20 support
+     * @param collection Address of the collection
+     * @param tokenId Token ID for the drop
+     * @param price ETH price in wei
+     * @param erc20Price ERC20 price in token units
+     * @param acceptedERC20 ERC20 token address
+     * @param startTime Start time timestamp
+     * @param endTime End time timestamp
+     * @param active Whether the drop is active
+     * @param ethEnabled Whether ETH payments are enabled
+     * @param erc20Enabled Whether ERC20 payments are enabled
+     */
+    function setDropWithERC20(
+        address collection,
+        uint256 tokenId,
+        uint256 price,
+        uint256 erc20Price,
+        address acceptedERC20,
+        uint256 startTime,
+        uint256 endTime,
+        bool active,
+        bool ethEnabled,
+        bool erc20Enabled
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropWithERC20(
+            tokenId, price, erc20Price, acceptedERC20, startTime, endTime, active, ethEnabled, erc20Enabled
+        );
+
+        emit CollectionUpdated(collection, "setDropWithERC20");
+    }
+
+    /**
+     * @dev Updates the ERC20 price for a drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID of the drop
+     * @param erc20Price New ERC20 price in token units
+     */
+    function updateDropERC20Price(address collection, uint256 tokenId, uint256 erc20Price)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropERC20Price(tokenId, erc20Price);
+
+        emit CollectionUpdated(collection, "updateDropERC20Price");
+    }
+
+    /**
+     * @dev Updates the accepted ERC20 token for a drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID of the drop
+     * @param acceptedERC20 Address of the ERC20 token to accept
+     */
+    function updateDropAcceptedERC20(address collection, uint256 tokenId, address acceptedERC20)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropAcceptedERC20(tokenId, acceptedERC20);
+
+        emit CollectionUpdated(collection, "updateDropAcceptedERC20");
+    }
+
+    /**
+     * @dev Enables or disables ETH payments for a drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID of the drop
+     * @param ethEnabled Whether ETH payments are enabled
+     */
+    function setDropETHEnabled(address collection, uint256 tokenId, bool ethEnabled)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropETHEnabled(tokenId, ethEnabled);
+
+        emit CollectionUpdated(collection, "setDropETHEnabled");
+    }
+
+    /**
+     * @dev Enables or disables ERC20 payments for a drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID of the drop
+     * @param erc20Enabled Whether ERC20 payments are enabled
+     */
+    function setDropERC20Enabled(address collection, uint256 tokenId, bool erc20Enabled)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropERC20Enabled(tokenId, erc20Enabled);
+
+        emit CollectionUpdated(collection, "setDropERC20Enabled");
+    }
+
+    /**
+     * @dev Updates both ETH and ERC20 prices for a drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID of the drop
+     * @param ethPrice New ETH price in wei
+     * @param erc20Price New ERC20 price in token units
+     */
+    function updateDropPrices(address collection, uint256 tokenId, uint256 ethPrice, uint256 erc20Price)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setDropPrices(tokenId, ethPrice, erc20Price);
+
+        emit CollectionUpdated(collection, "updateDropPrices");
     }
 
     /**

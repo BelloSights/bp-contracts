@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity 0.8.26;
+pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
 import {RewardPoolFactory} from "../src/reward-pool/RewardPoolFactory.sol";
@@ -469,60 +469,5 @@ contract UpgradeRewardPool is Script {
         );
     }
 
-    // Test functions for validation
-    function testCreateNewPool(
-        address factoryAddr,
-        address admin
-    ) external returns (uint256) {
-        console.log("\n=== TESTING NEW POOL CREATION ===");
-        RewardPoolFactory factory = RewardPoolFactory(payable(factoryAddr));
 
-        vm.startBroadcast(admin);
-        uint256 poolId = factory.createRewardPool(
-            "Test Upgrade Pool",
-            "Testing post-upgrade functionality"
-        );
-        vm.stopBroadcast();
-
-        address poolAddr = factory.getPoolAddress(poolId);
-        console.log("SUCCESS: New pool created successfully!");
-        console.log("  Pool ID:", poolId);
-        console.log("  Pool Address:", poolAddr);
-        console.log("  Uses new implementation:", factory.implementation());
-
-        return poolId;
-    }
-
-    function testBatchOperations(
-        address factoryAddr,
-        address admin,
-        uint256 poolId
-    ) external {
-        console.log("\n=== TESTING BATCH OPERATIONS ===");
-        RewardPoolFactory factory = RewardPoolFactory(payable(factoryAddr));
-
-        // Test batch add users
-        address[] memory users = new address[](3);
-        uint256[] memory xpAmounts = new uint256[](3);
-
-        users[0] = address(0x1001);
-        users[1] = address(0x1002);
-        users[2] = address(0x1003);
-        xpAmounts[0] = 100;
-        xpAmounts[1] = 200;
-        xpAmounts[2] = 300;
-
-        vm.startBroadcast(admin);
-        factory.batchAddUsers(poolId, users, xpAmounts);
-        vm.stopBroadcast();
-
-        console.log(
-            "SUCCESS: Batch operations working - added 3 users successfully"
-        );
-        console.log("  Users:", users.length);
-        console.log(
-            "  Total XP added:",
-            xpAmounts[0] + xpAmounts[1] + xpAmounts[2]
-        );
-    }
 }

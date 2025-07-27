@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity 0.8.26;
+pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
@@ -21,11 +21,13 @@ contract BlueprintERC1155ZeroTest is Test {
     address public newBlueprintRecipient = makeAddr("newBlueprintRecipient");
     address public newCreatorRecipient = makeAddr("newCreatorRecipient");
     address public newTreasury = makeAddr("newTreasury");
-    address public tokenBlueprintRecipient = makeAddr("tokenBlueprintRecipient");
+    address public tokenBlueprintRecipient =
+        makeAddr("tokenBlueprintRecipient");
     address public tokenCreatorRecipient = makeAddr("tokenCreatorRecipient");
     address public tokenTreasury = makeAddr("tokenTreasury");
     address public newRewardPoolRecipient = makeAddr("newRewardPoolRecipient");
-    address public tokenRewardPoolRecipient = makeAddr("tokenRewardPoolRecipient");
+    address public tokenRewardPoolRecipient =
+        makeAddr("tokenRewardPoolRecipient");
 
     uint256 public constant FEE_BASIS_POINTS = 4500; // 45%
     uint256 public constant CREATOR_BASIS_POINTS = 1000; // 10%
@@ -36,10 +38,27 @@ contract BlueprintERC1155ZeroTest is Test {
     uint256 public constant TOKEN_CREATOR_BASIS_POINTS = 750; // 7.5%
     uint256 public constant TOKEN_REWARD_POOL_BASIS_POINTS = 150; // 1.5%
 
-    event CollectionCreated(address indexed creator, address indexed collection, string uri);
-    event DropCreated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime);
-    event TokensMinted(address indexed to, uint256 indexed tokenId, uint256 amount);
-    event TokensBatchMinted(address indexed to, uint256[] tokenIds, uint256[] amounts);
+    event CollectionCreated(
+        address indexed creator,
+        address indexed collection,
+        string uri
+    );
+    event DropCreated(
+        uint256 indexed tokenId,
+        uint256 price,
+        uint256 startTime,
+        uint256 endTime
+    );
+    event TokensMinted(
+        address indexed to,
+        uint256 indexed tokenId,
+        uint256 amount
+    );
+    event TokensBatchMinted(
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts
+    );
     event FeeConfigUpdated(
         address blueprintRecipient,
         uint256 blueprintFeeBasisPoints,
@@ -62,7 +81,13 @@ contract BlueprintERC1155ZeroTest is Test {
     event TokenFeeConfigRemoved(uint256 indexed tokenId);
     event CollectionURIUpdated(string uri);
     event TokenURIUpdated(uint256 indexed tokenId, string uri);
-    event DropUpdated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime, bool active);
+    event DropUpdated(
+        uint256 indexed tokenId,
+        uint256 price,
+        uint256 startTime,
+        uint256 endTime,
+        bool active
+    );
 
     function setUp() public {
         // Deploy implementation contract
@@ -105,7 +130,10 @@ contract BlueprintERC1155ZeroTest is Test {
         assertEq(factory.defaultMintFee(), DEFAULT_MINT_FEE);
         assertEq(factory.defaultTreasury(), treasury);
         assertEq(factory.defaultRewardPoolRecipient(), rewardPoolRecipient);
-        assertEq(factory.defaultRewardPoolBasisPoints(), REWARD_POOL_BASIS_POINTS);
+        assertEq(
+            factory.defaultRewardPoolBasisPoints(),
+            REWARD_POOL_BASIS_POINTS
+        );
         assertTrue(factory.hasRole(factory.DEFAULT_ADMIN_ROLE(), admin));
     }
 
@@ -139,15 +167,32 @@ contract BlueprintERC1155ZeroTest is Test {
         vm.expectEmit(true, true, false, true);
         emit DropCreated(0, MINT_PRICE, startTime, endTime);
 
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
         assertEq(tokenId, 0);
 
         // Verify drop details
-        (uint256 price, uint256 start, uint256 end, bool active) = nft.drops(tokenId);
+        (
+            uint256 price,
+            uint256 erc20Price,
+            address acceptedERC20,
+            uint256 start,
+            uint256 end,
+            bool active,
+            bool ethEnabled,
+            bool erc20Enabled
+        ) = nft.drops(tokenId);
         assertEq(price, MINT_PRICE);
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
+        assertTrue(ethEnabled);
+        assertFalse(erc20Enabled); // ERC20 should be disabled by default
         vm.stopPrank();
     }
 
@@ -160,8 +205,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
         vm.stopPrank();
 
         // Fast forward to within the drop period
@@ -176,7 +227,7 @@ contract BlueprintERC1155ZeroTest is Test {
         // Mint token
         uint256 amount = 1;
         vm.deal(minter, MINT_PRICE);
-        
+
         vm.expectEmit(true, true, false, true);
         emit TokensMinted(minter, tokenId, amount);
 
@@ -192,7 +243,10 @@ contract BlueprintERC1155ZeroTest is Test {
         uint256 platformFee = (MINT_PRICE * FEE_BASIS_POINTS) / 10000;
         uint256 creatorFee = (MINT_PRICE * CREATOR_BASIS_POINTS) / 10000;
         uint256 rewardPoolFee = (MINT_PRICE * REWARD_POOL_BASIS_POINTS) / 10000;
-        uint256 treasuryAmount = MINT_PRICE - platformFee - creatorFee - rewardPoolFee;
+        uint256 treasuryAmount = MINT_PRICE -
+            platformFee -
+            creatorFee -
+            rewardPoolFee;
 
         assertEq(blueprintRecipient.balance, platformFee);
         assertEq(creator.balance, creatorFee);
@@ -209,8 +263,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
         vm.stopPrank();
 
         // Fast forward to within the drop period
@@ -220,12 +280,16 @@ contract BlueprintERC1155ZeroTest is Test {
         uint256 amount = 1;
         uint256 insufficientPayment = MINT_PRICE - 1;
         vm.deal(minter, insufficientPayment);
-        
-        vm.expectRevert(abi.encodeWithSelector(
-            BlueprintERC1155Zero.BlueprintERC1155__InsufficientPayment.selector,
-            MINT_PRICE,
-            insufficientPayment
-        ));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BlueprintERC1155Zero
+                    .BlueprintERC1155__InsufficientPayment
+                    .selector,
+                MINT_PRICE,
+                insufficientPayment
+            )
+        );
 
         vm.prank(minter);
         nft.mint{value: insufficientPayment}(minter, tokenId, amount);
@@ -240,15 +304,23 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
         vm.stopPrank();
 
         // Try to mint after drop ended
         vm.warp(endTime + 1);
         vm.deal(minter, MINT_PRICE);
-        
-        vm.expectRevert(BlueprintERC1155Zero.BlueprintERC1155__DropEnded.selector);
+
+        vm.expectRevert(
+            BlueprintERC1155Zero.BlueprintERC1155__DropEnded.selector
+        );
 
         vm.prank(minter);
         nft.mint{value: MINT_PRICE}(minter, tokenId, 1);
@@ -274,7 +346,10 @@ contract BlueprintERC1155ZeroTest is Test {
         assertEq(factory.defaultMintFee(), newMintFee);
         assertEq(factory.defaultTreasury(), newTreasury);
         assertEq(factory.defaultRewardPoolRecipient(), newRewardPoolRecipient);
-        assertEq(factory.defaultRewardPoolBasisPoints(), newRewardPoolBasisPoints);
+        assertEq(
+            factory.defaultRewardPoolBasisPoints(),
+            newRewardPoolBasisPoints
+        );
     }
 
     function test_InvalidFeeConfig() public {
@@ -306,6 +381,7 @@ contract BlueprintERC1155ZeroTest is Test {
             uint256 updatedCreatorBasisPoints,
             ,
             uint256 updatedRewardPoolBasisPoints,
+
         ) = nft.defaultFeeConfig();
 
         // Verify values were set correctly
@@ -337,7 +413,13 @@ contract BlueprintERC1155ZeroTest is Test {
         uint256 startTime = block.timestamp + 1 days;
         uint256 endTime = block.timestamp + 30 days;
 
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
         vm.stopPrank();
 
         // Fast forward to after start time
@@ -487,8 +569,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Admin mint
         factory.adminMint(collection, user1, tokenId, 5);
@@ -507,11 +595,23 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Create another drop
-        uint256 secondTokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+        uint256 secondTokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Batch mint both drops
         uint256[] memory tokenIds = new uint256[](2);
@@ -539,8 +639,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Update token URI
         factory.updateTokenURI(collection, tokenId, "ipfs://custom/0");
@@ -550,11 +656,20 @@ contract BlueprintERC1155ZeroTest is Test {
         assertEq(tokenURI, "ipfs://custom/0");
 
         // Create a new drop that should use default URI
-        uint256 secondTokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+        uint256 secondTokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Check that second drop uses base URI with token ID
         string memory baseUri = nft.uri(secondTokenId);
-        assertEq(baseUri, string(abi.encodePacked(uri, vm.toString(secondTokenId))));
+        assertEq(
+            baseUri,
+            string(abi.encodePacked(uri, vm.toString(secondTokenId)))
+        );
 
         vm.stopPrank();
     }
@@ -570,7 +685,8 @@ contract BlueprintERC1155ZeroTest is Test {
         factory.updateRewardPoolRecipient(collection, newRewardPoolRecipient);
 
         // Verify updated config
-        (,,,, address updatedRewardPoolRecipient,,) = nft.defaultFeeConfig();
+        (, , , , address updatedRewardPoolRecipient, , ) = nft
+            .defaultFeeConfig();
 
         assertEq(updatedRewardPoolRecipient, newRewardPoolRecipient);
 
@@ -586,8 +702,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Set token-specific fee config
         factory.updateTokenFeeConfig(
@@ -636,8 +758,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Set token-specific fee config
         factory.updateTokenFeeConfig(
@@ -670,10 +798,15 @@ contract BlueprintERC1155ZeroTest is Test {
         nft.mint{value: MINT_PRICE}(user1, tokenId, 1);
 
         // Calculate expected fees based on token-specific fee config
-        uint256 blueprintFee = (MINT_PRICE * TOKEN_BLUEPRINT_BASIS_POINTS) / 10000;
+        uint256 blueprintFee = (MINT_PRICE * TOKEN_BLUEPRINT_BASIS_POINTS) /
+            10000;
         uint256 creatorFee = (MINT_PRICE * TOKEN_CREATOR_BASIS_POINTS) / 10000;
-        uint256 rewardPoolFee = (MINT_PRICE * TOKEN_REWARD_POOL_BASIS_POINTS) / 10000;
-        uint256 treasuryAmount = MINT_PRICE - blueprintFee - creatorFee - rewardPoolFee;
+        uint256 rewardPoolFee = (MINT_PRICE * TOKEN_REWARD_POOL_BASIS_POINTS) /
+            10000;
+        uint256 treasuryAmount = MINT_PRICE -
+            blueprintFee -
+            creatorFee -
+            rewardPoolFee;
 
         // Verify fee distribution
         assertEq(tokenBlueprintRecipient.balance, blueprintFee);
@@ -693,11 +826,23 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Create a second drop with custom fee config
-        uint256 secondTokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+        uint256 secondTokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Set custom fee config for second drop
         factory.updateTokenFeeConfig(
@@ -747,15 +892,25 @@ contract BlueprintERC1155ZeroTest is Test {
         uint256 drop1Cost = MINT_PRICE * amounts[0];
         uint256 drop1BlueprintFee = (drop1Cost * FEE_BASIS_POINTS) / 10000;
         uint256 drop1CreatorFee = (drop1Cost * CREATOR_BASIS_POINTS) / 10000;
-        uint256 drop1RewardPoolFee = (drop1Cost * REWARD_POOL_BASIS_POINTS) / 10000;
-        uint256 drop1TreasuryAmount = drop1Cost - drop1BlueprintFee - drop1CreatorFee - drop1RewardPoolFee;
+        uint256 drop1RewardPoolFee = (drop1Cost * REWARD_POOL_BASIS_POINTS) /
+            10000;
+        uint256 drop1TreasuryAmount = drop1Cost -
+            drop1BlueprintFee -
+            drop1CreatorFee -
+            drop1RewardPoolFee;
 
         // Calculate expected fees for second drop (custom config)
         uint256 drop2Cost = MINT_PRICE * amounts[1];
-        uint256 drop2BlueprintFee = (drop2Cost * TOKEN_BLUEPRINT_BASIS_POINTS) / 10000;
-        uint256 drop2CreatorFee = (drop2Cost * TOKEN_CREATOR_BASIS_POINTS) / 10000;
-        uint256 drop2RewardPoolFee = (drop2Cost * TOKEN_REWARD_POOL_BASIS_POINTS) / 10000;
-        uint256 drop2TreasuryAmount = drop2Cost - drop2BlueprintFee - drop2CreatorFee - drop2RewardPoolFee;
+        uint256 drop2BlueprintFee = (drop2Cost * TOKEN_BLUEPRINT_BASIS_POINTS) /
+            10000;
+        uint256 drop2CreatorFee = (drop2Cost * TOKEN_CREATOR_BASIS_POINTS) /
+            10000;
+        uint256 drop2RewardPoolFee = (drop2Cost *
+            TOKEN_REWARD_POOL_BASIS_POINTS) / 10000;
+        uint256 drop2TreasuryAmount = drop2Cost -
+            drop2BlueprintFee -
+            drop2CreatorFee -
+            drop2RewardPoolFee;
 
         // Verify fee distribution for default config
         assertEq(blueprintRecipient.balance, drop1BlueprintFee);
@@ -812,8 +967,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
-        uint256 tokenId = factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
+
+        uint256 tokenId = factory.createNewDrop(
+            collection,
+            MINT_PRICE,
+            startTime,
+            endTime,
+            true
+        );
 
         // Update with zero address for reward pool
         factory.updateFeeConfig(
@@ -866,12 +1027,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
+
         factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
 
         // Update with zero address for blueprint recipient
         vm.expectRevert(
-            BlueprintERC1155FactoryZero.BlueprintERC1155Factory__ZeroBlueprintRecipient.selector
+            BlueprintERC1155FactoryZero
+                .BlueprintERC1155Factory__ZeroBlueprintRecipient
+                .selector
         );
         factory.updateFeeConfig(
             collection,
@@ -894,12 +1057,14 @@ contract BlueprintERC1155ZeroTest is Test {
 
         uint256 startTime = block.timestamp;
         uint256 endTime = startTime + 1 days;
-        
+
         factory.createNewDrop(collection, MINT_PRICE, startTime, endTime, true);
 
         // Update with zero address for creator recipient
         vm.expectRevert(
-            BlueprintERC1155FactoryZero.BlueprintERC1155Factory__ZeroCreatorRecipient.selector
+            BlueprintERC1155FactoryZero
+                .BlueprintERC1155Factory__ZeroCreatorRecipient
+                .selector
         );
         factory.updateFeeConfig(
             collection,
@@ -913,4 +1078,4 @@ contract BlueprintERC1155ZeroTest is Test {
         );
         vm.stopPrank();
     }
-} 
+}

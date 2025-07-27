@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity 0.8.26;
+pragma solidity 0.8.28;
 
 import "@openzeppelin-contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin-contracts/access/AccessControl.sol";
 import "@openzeppelin-contracts/utils/Strings.sol";
 import "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin-contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title BlueprintERC1155Zero
@@ -12,13 +14,17 @@ import "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
  */
 contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
     using Strings for uint256;
+    using SafeERC20 for IERC20;
 
     // ===== ERRORS =====
     error BlueprintERC1155__InvalidStartEndTime();
     error BlueprintERC1155__DropNotActive();
     error BlueprintERC1155__DropNotStarted();
     error BlueprintERC1155__DropEnded();
-    error BlueprintERC1155__InsufficientPayment(uint256 required, uint256 provided);
+    error BlueprintERC1155__InsufficientPayment(
+        uint256 required,
+        uint256 provided
+    );
     error BlueprintERC1155__BlueprintFeeTransferFailed();
     error BlueprintERC1155__CreatorFeeTransferFailed();
     error BlueprintERC1155__TreasuryTransferFailed();
@@ -29,15 +35,30 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
     error BlueprintERC1155__BatchLengthMismatch();
     error BlueprintERC1155__ZeroBlueprintRecipient();
     error BlueprintERC1155__ZeroCreatorRecipient();
+    error BlueprintERC1155__InvalidERC20Address();
+    error BlueprintERC1155__ERC20NotEnabled();
+    error BlueprintERC1155__ETHNotEnabled();
+    error BlueprintERC1155__InsufficientERC20Allowance(
+        uint256 required,
+        uint256 allowance
+    );
+    error BlueprintERC1155__InsufficientERC20Balance(
+        uint256 required,
+        uint256 balance
+    );
 
     bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
     bytes32 public constant CREATOR_ROLE = keccak256("CREATOR_ROLE");
 
     struct Drop {
-        uint256 price;
+        uint256 price; // ETH price in wei
+        uint256 erc20Price; // ERC20 price in token units
+        address acceptedERC20; // ERC20 token address (address(0) means ERC20 not enabled)
         uint256 startTime;
         uint256 endTime;
         bool active;
+        bool ethEnabled; // Whether ETH payments are enabled
+        bool erc20Enabled; // Whether ERC20 payments are enabled
     }
 
     struct FeeConfig {
@@ -62,10 +83,47 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
     mapping(uint256 => FeeConfig) public tokenFeeConfigs;
     mapping(uint256 => bool) public hasCustomFeeConfig;
 
-    event DropCreated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime);
-    event DropUpdated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime, bool active);
-    event TokensMinted(address indexed to, uint256 indexed tokenId, uint256 amount);
-    event TokensBatchMinted(address indexed to, uint256[] tokenIds, uint256[] amounts);
+    event DropCreated(
+        uint256 indexed tokenId,
+        uint256 price,
+        uint256 startTime,
+        uint256 endTime
+    );
+    event DropUpdated(
+        uint256 indexed tokenId,
+        uint256 price,
+        uint256 startTime,
+        uint256 endTime,
+        bool active
+    );
+    event TokensMinted(
+        address indexed to,
+        uint256 indexed tokenId,
+        uint256 amount
+    );
+    event TokensBatchMinted(
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts
+    );
+
+    // Enhanced events for payment tracking
+    event TokensMintedWithPayment(
+        address indexed to,
+        uint256 indexed tokenId,
+        uint256 amount,
+        address indexed paymentToken, // address(0) for ETH
+        uint256 amountPaidWei, // amount paid in wei (for ETH) or token units (for ERC20)
+        uint256 timestamp
+    );
+    event TokensBatchMintedWithPayment(
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts,
+        address indexed paymentToken, // address(0) for ETH
+        uint256 totalAmountPaidWei, // total amount paid in wei (for ETH) or token units (for ERC20)
+        uint256 timestamp
+    );
     event FeeConfigUpdated(
         address blueprintRecipient,
         uint256 blueprintFeeBasisPoints,
@@ -134,11 +192,15 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         return _symbol;
     }
 
-    function setName(string memory name_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setName(
+        string memory name_
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _name = name_;
     }
 
-    function setSymbol(string memory symbol_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setSymbol(
+        string memory symbol_
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _symbol = symbol_;
     }
 
@@ -148,7 +210,10 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         emit CollectionURIUpdated(uri_);
     }
 
-    function setTokenURI(uint256 tokenId, string memory uri_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setTokenURI(
+        uint256 tokenId,
+        string memory uri_
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _tokenURIs[tokenId] = uri_;
         emit TokenURIUpdated(tokenId, uri_);
     }
@@ -180,9 +245,13 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
 
         drops[tokenId] = Drop({
             price: price,
+            erc20Price: 0,
+            acceptedERC20: address(0),
             startTime: startTime,
             endTime: endTime,
-            active: active
+            active: active,
+            ethEnabled: true,
+            erc20Enabled: false
         });
 
         emit DropCreated(tokenId, price, startTime, endTime);
@@ -207,18 +276,23 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
 
         drops[tokenId] = Drop({
             price: price,
+            erc20Price: 0,
+            acceptedERC20: address(0),
             startTime: startTime,
             endTime: endTime,
-            active: active
+            active: active,
+            ethEnabled: true,
+            erc20Enabled: false
         });
 
         emit DropUpdated(tokenId, price, startTime, endTime, active);
     }
 
-    function updateDropTimes(uint256 tokenId, uint256 startTime, uint256 endTime)
-        external
-        onlyRole(CREATOR_ROLE)
-    {
+    function updateDropTimes(
+        uint256 tokenId,
+        uint256 startTime,
+        uint256 endTime
+    ) external onlyRole(CREATOR_ROLE) {
         if (startTime >= endTime) {
             revert BlueprintERC1155__StartAfterEnd();
         }
@@ -243,6 +317,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
         }
+        if (!drop.ethEnabled) {
+            revert BlueprintERC1155__ETHNotEnabled();
+        }
         if (block.timestamp < drop.startTime) {
             revert BlueprintERC1155__DropNotStarted();
         }
@@ -263,23 +340,34 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        uint256 platformFee = (payment * config.blueprintFeeBasisPoints) / 10000;
+        uint256 platformFee = (payment * config.blueprintFeeBasisPoints) /
+            10000;
         uint256 creatorFee = (payment * config.creatorBasisPoints) / 10000;
-        uint256 rewardPoolFee = (payment * config.rewardPoolBasisPoints) / 10000;
-        uint256 treasuryAmount = payment - platformFee - creatorFee - rewardPoolFee;
+        uint256 rewardPoolFee = (payment * config.rewardPoolBasisPoints) /
+            10000;
+        uint256 treasuryAmount = payment -
+            platformFee -
+            creatorFee -
+            rewardPoolFee;
 
-        (bool feeSuccess,) = config.blueprintRecipient.call{value: platformFee}("");
+        (bool feeSuccess, ) = config.blueprintRecipient.call{
+            value: platformFee
+        }("");
         if (!feeSuccess) {
             revert BlueprintERC1155__BlueprintFeeTransferFailed();
         }
 
-        (bool creatorSuccess,) = config.creatorRecipient.call{value: creatorFee}("");
+        (bool creatorSuccess, ) = config.creatorRecipient.call{
+            value: creatorFee
+        }("");
         if (!creatorSuccess) {
             revert BlueprintERC1155__CreatorFeeTransferFailed();
         }
 
         if (config.rewardPoolRecipient != address(0)) {
-            (bool rewardSuccess,) = config.rewardPoolRecipient.call{value: rewardPoolFee}("");
+            (bool rewardSuccess, ) = config.rewardPoolRecipient.call{
+                value: rewardPoolFee
+            }("");
             if (!rewardSuccess) {
                 revert BlueprintERC1155__RewardPoolFeeTransferFailed();
             }
@@ -288,7 +376,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         }
 
         if (treasuryAmount > 0) {
-            (bool treasurySuccess,) = config.treasury.call{value: treasuryAmount}("");
+            (bool treasurySuccess, ) = config.treasury.call{
+                value: treasuryAmount
+            }("");
             if (!treasurySuccess) {
                 revert BlueprintERC1155__TreasuryTransferFailed();
             }
@@ -299,13 +389,132 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         _globalTotalSupply += amount;
 
         emit TokensMinted(to, tokenId, amount);
+        emit TokensMintedWithPayment(
+            to,
+            tokenId,
+            amount,
+            address(0),
+            payment,
+            block.timestamp
+        );
     }
 
-    function batchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts)
-        external
-        payable
-        nonReentrant
-    {
+    function mintWithERC20(
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external nonReentrant {
+        Drop memory drop = drops[tokenId];
+        if (!drop.active) {
+            revert BlueprintERC1155__DropNotActive();
+        }
+        if (!drop.erc20Enabled) {
+            revert BlueprintERC1155__ERC20NotEnabled();
+        }
+        if (drop.acceptedERC20 == address(0)) {
+            revert BlueprintERC1155__InvalidERC20Address();
+        }
+        if (block.timestamp < drop.startTime) {
+            revert BlueprintERC1155__DropNotStarted();
+        }
+        if (block.timestamp > drop.endTime) {
+            revert BlueprintERC1155__DropEnded();
+        }
+
+        uint256 requiredPayment = drop.erc20Price * amount;
+        IERC20 erc20Token = IERC20(drop.acceptedERC20);
+
+        // Check user balance
+        uint256 userBalance = erc20Token.balanceOf(msg.sender);
+        if (userBalance < requiredPayment) {
+            revert BlueprintERC1155__InsufficientERC20Balance(
+                requiredPayment,
+                userBalance
+            );
+        }
+
+        // Check allowance
+        uint256 allowance = erc20Token.allowance(msg.sender, address(this));
+        if (allowance < requiredPayment) {
+            revert BlueprintERC1155__InsufficientERC20Allowance(
+                requiredPayment,
+                allowance
+            );
+        }
+
+        FeeConfig memory config = getFeeConfig(tokenId);
+        if (config.blueprintRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroBlueprintRecipient();
+        }
+        if (config.creatorRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroCreatorRecipient();
+        }
+
+        uint256 platformFee = (requiredPayment *
+            config.blueprintFeeBasisPoints) / 10000;
+        uint256 creatorFee = (requiredPayment * config.creatorBasisPoints) /
+            10000;
+        uint256 rewardPoolFee = (requiredPayment *
+            config.rewardPoolBasisPoints) / 10000;
+        uint256 treasuryAmount = requiredPayment -
+            platformFee -
+            creatorFee -
+            rewardPoolFee;
+
+        // Transfer platform fee
+        erc20Token.safeTransferFrom(
+            msg.sender,
+            config.blueprintRecipient,
+            platformFee
+        );
+
+        // Transfer creator fee
+        erc20Token.safeTransferFrom(
+            msg.sender,
+            config.creatorRecipient,
+            creatorFee
+        );
+
+        // Transfer reward pool fee if recipient is set
+        if (config.rewardPoolRecipient != address(0)) {
+            erc20Token.safeTransferFrom(
+                msg.sender,
+                config.rewardPoolRecipient,
+                rewardPoolFee
+            );
+        } else {
+            treasuryAmount += rewardPoolFee;
+        }
+
+        // Transfer treasury amount
+        if (treasuryAmount > 0) {
+            erc20Token.safeTransferFrom(
+                msg.sender,
+                config.treasury,
+                treasuryAmount
+            );
+        }
+
+        _mint(to, tokenId, amount, "");
+        _totalSupply[tokenId] += amount;
+        _globalTotalSupply += amount;
+
+        emit TokensMinted(to, tokenId, amount);
+        emit TokensMintedWithPayment(
+            to,
+            tokenId,
+            amount,
+            drop.acceptedERC20,
+            requiredPayment,
+            block.timestamp
+        );
+    }
+
+    function batchMint(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external payable nonReentrant {
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
@@ -318,6 +527,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
             if (!drop.active) {
                 revert BlueprintERC1155__DropNotActive();
             }
+            if (!drop.ethEnabled) {
+                revert BlueprintERC1155__ETHNotEnabled();
+            }
             if (block.timestamp < drop.startTime) {
                 revert BlueprintERC1155__DropNotStarted();
             }
@@ -329,7 +541,10 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         }
 
         if (msg.value < requiredPayment) {
-            revert BlueprintERC1155__InsufficientPayment(requiredPayment, msg.value);
+            revert BlueprintERC1155__InsufficientPayment(
+                requiredPayment,
+                msg.value
+            );
         }
 
         _mintBatch(to, tokenIds, amounts, "");
@@ -362,26 +577,34 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
             }
 
             // Calculate fees
-            uint256 platformFee = (payment * config.blueprintFeeBasisPoints) / 10000;
+            uint256 platformFee = (payment * config.blueprintFeeBasisPoints) /
+                10000;
             uint256 creatorFee = (payment * config.creatorBasisPoints) / 10000;
-            uint256 rewardPoolFee = (payment * config.rewardPoolBasisPoints) / 10000;
+            uint256 rewardPoolFee = (payment * config.rewardPoolBasisPoints) /
+                10000;
             uint256 treasuryAmount = payment - platformFee - creatorFee;
 
             // Send platform fee
-            (bool feeSuccess,) = config.blueprintRecipient.call{value: platformFee}("");
+            (bool feeSuccess, ) = config.blueprintRecipient.call{
+                value: platformFee
+            }("");
             if (!feeSuccess) {
                 revert BlueprintERC1155__BlueprintFeeTransferFailed();
             }
 
             // Send creator fee
-            (bool creatorSuccess,) = config.creatorRecipient.call{value: creatorFee}("");
+            (bool creatorSuccess, ) = config.creatorRecipient.call{
+                value: creatorFee
+            }("");
             if (!creatorSuccess) {
                 revert BlueprintERC1155__CreatorFeeTransferFailed();
             }
 
             // Send reward pool fee if recipient is set, otherwise it goes to treasury
             if (rewardPoolFee > 0 && config.rewardPoolRecipient != address(0)) {
-                (bool rewardPoolSuccess,) = config.rewardPoolRecipient.call{value: rewardPoolFee}("");
+                (bool rewardPoolSuccess, ) = config.rewardPoolRecipient.call{
+                    value: rewardPoolFee
+                }("");
                 if (!rewardPoolSuccess) {
                     revert BlueprintERC1155__RewardPoolFeeTransferFailed();
                 }
@@ -391,7 +614,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
 
             // Send treasury amount
             if (treasuryAmount > 0 && config.treasury != address(0)) {
-                (bool treasurySuccess,) = config.treasury.call{value: treasuryAmount}("");
+                (bool treasurySuccess, ) = config.treasury.call{
+                    value: treasuryAmount
+                }("");
                 if (!treasurySuccess) {
                     revert BlueprintERC1155__TreasuryTransferFailed();
                 }
@@ -403,7 +628,7 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         // Refund excess payment if any
         if (msg.value > requiredPayment) {
             uint256 refund = msg.value - requiredPayment;
-            (bool refundSuccess,) = msg.sender.call{value: refund}("");
+            (bool refundSuccess, ) = msg.sender.call{value: refund}("");
             if (!refundSuccess) {
                 revert BlueprintERC1155__RefundFailed();
             }
@@ -412,10 +637,147 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         emit TokensBatchMinted(to, tokenIds, amounts);
     }
 
-    function adminMint(address to, uint256 tokenId, uint256 amount)
-        external
-        onlyRole(FACTORY_ROLE)
-    {
+    function batchMintWithERC20(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external nonReentrant {
+        if (tokenIds.length != amounts.length) {
+            revert BlueprintERC1155__BatchLengthMismatch();
+        }
+
+        uint256 requiredPayment = 0;
+        address erc20Address = address(0);
+
+        // Calculate required payment and validate drops
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            Drop memory drop = drops[tokenIds[i]];
+            if (!drop.active) {
+                revert BlueprintERC1155__DropNotActive();
+            }
+            if (!drop.erc20Enabled) {
+                revert BlueprintERC1155__ERC20NotEnabled();
+            }
+            if (drop.acceptedERC20 == address(0)) {
+                revert BlueprintERC1155__InvalidERC20Address();
+            }
+
+            // Ensure all drops use the same ERC20 token
+            if (i == 0) {
+                erc20Address = drop.acceptedERC20;
+            } else if (erc20Address != drop.acceptedERC20) {
+                revert BlueprintERC1155__InvalidERC20Address(); // Mixed ERC20 tokens not supported
+            }
+
+            if (block.timestamp < drop.startTime) {
+                revert BlueprintERC1155__DropNotStarted();
+            }
+            if (block.timestamp > drop.endTime && drop.endTime != 0) {
+                revert BlueprintERC1155__DropEnded();
+            }
+
+            requiredPayment += drop.erc20Price * amounts[i];
+        }
+
+        IERC20 erc20Token = IERC20(erc20Address);
+
+        // Check user balance
+        uint256 userBalance = erc20Token.balanceOf(msg.sender);
+        if (userBalance < requiredPayment) {
+            revert BlueprintERC1155__InsufficientERC20Balance(
+                requiredPayment,
+                userBalance
+            );
+        }
+
+        // Check allowance
+        uint256 allowance = erc20Token.allowance(msg.sender, address(this));
+        if (allowance < requiredPayment) {
+            revert BlueprintERC1155__InsufficientERC20Allowance(
+                requiredPayment,
+                allowance
+            );
+        }
+
+        _mintBatch(to, tokenIds, amounts, "");
+
+        // Update total supplies
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            _totalSupply[tokenIds[i]] += amounts[i];
+            totalAmount += amounts[i];
+        }
+
+        // Update global total supply
+        _globalTotalSupply += totalAmount;
+
+        // Process ERC20 payments for each token
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            Drop memory drop = drops[tokenIds[i]];
+            uint256 payment = drop.erc20Price * amounts[i];
+
+            // Get fee config for this token
+            FeeConfig memory config = getFeeConfig(tokenIds[i]);
+
+            // Validate essential recipients
+            if (config.blueprintRecipient == address(0)) {
+                revert BlueprintERC1155__ZeroBlueprintRecipient();
+            }
+            if (config.creatorRecipient == address(0)) {
+                revert BlueprintERC1155__ZeroCreatorRecipient();
+            }
+
+            // Calculate fees
+            uint256 platformFee = (payment * config.blueprintFeeBasisPoints) /
+                10000;
+            uint256 creatorFee = (payment * config.creatorBasisPoints) / 10000;
+            uint256 rewardPoolFee = (payment * config.rewardPoolBasisPoints) /
+                10000;
+            uint256 treasuryAmount = payment - platformFee - creatorFee;
+
+            // Transfer platform fee
+            erc20Token.safeTransferFrom(
+                msg.sender,
+                config.blueprintRecipient,
+                platformFee
+            );
+
+            // Transfer creator fee
+            erc20Token.safeTransferFrom(
+                msg.sender,
+                config.creatorRecipient,
+                creatorFee
+            );
+
+            // Transfer reward pool fee if recipient is set, otherwise it goes to treasury
+            if (rewardPoolFee > 0 && config.rewardPoolRecipient != address(0)) {
+                erc20Token.safeTransferFrom(
+                    msg.sender,
+                    config.rewardPoolRecipient,
+                    rewardPoolFee
+                );
+                // Subtract reward pool fee from treasury amount since it was sent
+                treasuryAmount -= rewardPoolFee;
+            }
+
+            // Transfer treasury amount
+            if (treasuryAmount > 0 && config.treasury != address(0)) {
+                erc20Token.safeTransferFrom(
+                    msg.sender,
+                    config.treasury,
+                    treasuryAmount
+                );
+            }
+        }
+
+        emit TokensBatchMinted(to, tokenIds, amounts);
+    }
+
+    function adminMint(
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external onlyRole(FACTORY_ROLE) {
         _mint(to, tokenId, amount, "");
 
         // Update total supply for the token ID
@@ -427,10 +789,11 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         emit TokensMinted(to, tokenId, amount);
     }
 
-    function adminBatchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts)
-        external
-        onlyRole(FACTORY_ROLE)
-    {
+    function adminBatchMint(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external onlyRole(FACTORY_ROLE) {
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
@@ -450,7 +813,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         emit TokensBatchMinted(to, tokenIds, amounts);
     }
 
-    function getFeeConfig(uint256 tokenId) public view returns (FeeConfig memory) {
+    function getFeeConfig(
+        uint256 tokenId
+    ) public view returns (FeeConfig memory) {
         if (hasCustomFeeConfig[tokenId]) {
             return tokenFeeConfigs[tokenId];
         }
@@ -529,34 +894,55 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         );
     }
 
-    function removeTokenFeeConfig(uint256 tokenId) external onlyRole(FACTORY_ROLE) {
+    function removeTokenFeeConfig(
+        uint256 tokenId
+    ) external onlyRole(FACTORY_ROLE) {
         delete tokenFeeConfigs[tokenId];
         hasCustomFeeConfig[tokenId] = false;
 
         emit TokenFeeConfigRemoved(tokenId);
     }
 
-    function setDropPrice(uint256 tokenId, uint256 price) external onlyRole(FACTORY_ROLE) {
+    function setDropPrice(
+        uint256 tokenId,
+        uint256 price
+    ) external onlyRole(FACTORY_ROLE) {
         drops[tokenId].price = price;
 
         emit DropUpdated(
-            tokenId, price, drops[tokenId].startTime, drops[tokenId].endTime, drops[tokenId].active
+            tokenId,
+            price,
+            drops[tokenId].startTime,
+            drops[tokenId].endTime,
+            drops[tokenId].active
         );
     }
 
-    function setDropStartTime(uint256 tokenId, uint256 startTime) external onlyRole(FACTORY_ROLE) {
-        if (startTime >= drops[tokenId].endTime && drops[tokenId].endTime != 0) {
+    function setDropStartTime(
+        uint256 tokenId,
+        uint256 startTime
+    ) external onlyRole(FACTORY_ROLE) {
+        if (
+            startTime >= drops[tokenId].endTime && drops[tokenId].endTime != 0
+        ) {
             revert BlueprintERC1155__StartAfterEnd();
         }
 
         drops[tokenId].startTime = startTime;
 
         emit DropUpdated(
-            tokenId, drops[tokenId].price, startTime, drops[tokenId].endTime, drops[tokenId].active
+            tokenId,
+            drops[tokenId].price,
+            startTime,
+            drops[tokenId].endTime,
+            drops[tokenId].active
         );
     }
 
-    function setDropEndTime(uint256 tokenId, uint256 endTime) external onlyRole(FACTORY_ROLE) {
+    function setDropEndTime(
+        uint256 tokenId,
+        uint256 endTime
+    ) external onlyRole(FACTORY_ROLE) {
         if (drops[tokenId].startTime >= endTime && endTime != 0) {
             revert BlueprintERC1155__EndBeforeStart();
         }
@@ -564,19 +950,32 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         drops[tokenId].endTime = endTime;
 
         emit DropUpdated(
-            tokenId, drops[tokenId].price, drops[tokenId].startTime, endTime, drops[tokenId].active
+            tokenId,
+            drops[tokenId].price,
+            drops[tokenId].startTime,
+            endTime,
+            drops[tokenId].active
         );
     }
 
-    function setDropActive(uint256 tokenId, bool active) external onlyRole(FACTORY_ROLE) {
+    function setDropActive(
+        uint256 tokenId,
+        bool active
+    ) external onlyRole(FACTORY_ROLE) {
         drops[tokenId].active = active;
 
         emit DropUpdated(
-            tokenId, drops[tokenId].price, drops[tokenId].startTime, drops[tokenId].endTime, active
+            tokenId,
+            drops[tokenId].price,
+            drops[tokenId].startTime,
+            drops[tokenId].endTime,
+            active
         );
     }
 
-    function setCreatorRecipient(address _creatorRecipient) external onlyRole(FACTORY_ROLE) {
+    function setCreatorRecipient(
+        address _creatorRecipient
+    ) external onlyRole(FACTORY_ROLE) {
         defaultFeeConfig.creatorRecipient = _creatorRecipient;
 
         emit FeeConfigUpdated(
@@ -590,7 +989,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         );
     }
 
-    function setRewardPoolRecipient(address _rewardPoolRecipient) external onlyRole(FACTORY_ROLE) {
+    function setRewardPoolRecipient(
+        address _rewardPoolRecipient
+    ) external onlyRole(FACTORY_ROLE) {
         defaultFeeConfig.rewardPoolRecipient = _rewardPoolRecipient;
 
         emit FeeConfigUpdated(
@@ -604,12 +1005,9 @@ contract BlueprintERC1155Zero is ERC1155, AccessControl, ReentrancyGuard {
         );
     }
 
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC1155, AccessControl)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(ERC1155, AccessControl) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
-} 
+}

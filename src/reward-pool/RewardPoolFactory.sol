@@ -8,14 +8,14 @@ __________.__                             .__        __
         \/                 \/|__|                 \/      
 */
 
-pragma solidity 0.8.26;
+pragma solidity 0.8.28;
 
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Proxy} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Clones} from "@openzeppelin-contracts/proxy/Clones.sol";
+import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 import {RewardPool} from "./RewardPool.sol";
 import {IRewardPool} from "./interfaces/IRewardPool.sol";
 
