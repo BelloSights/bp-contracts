@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { DropSDK } from "./dropSdk";
+import { CreatorRewardPoolSDK } from "./rewardPoolCreatorSdk";
 import { publicClient, walletClient } from "./viem";
 
-export { DropSDK, publicClient, walletClient };
+export { CreatorRewardPoolSDK, DropSDK, publicClient, walletClient };

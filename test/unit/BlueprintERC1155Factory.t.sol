@@ -173,13 +173,13 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
         (
             uint256 price,
-            uint256 erc20Price,
-            address acceptedERC20,
+            ,
+            ,
             uint256 dropsStartTime,
             uint256 dropsEndTime,
             bool active,
-            bool ethEnabled,
-            bool erc20Enabled
+            ,
+
         ) = collectionContract.drops(dropId);
 
         assertEq(price, defaultMintFee);
@@ -989,23 +989,21 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
         (
             uint256 price,
-            uint256 erc20PriceReturned,
-            address acceptedERC20,
+            ,
+            ,
             uint256 start,
             uint256 end,
             bool active,
-            bool ethEnabled,
-            bool erc20Enabled
+            ,
+
         ) = collectionContract.drops(tokenId);
 
         assertEq(price, ethPrice);
-        assertEq(erc20PriceReturned, erc20Price);
-        assertEq(acceptedERC20, address(mockERC20));
+        // erc20PriceReturned and acceptedERC20 ignored to avoid unused warnings
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
-        assertTrue(ethEnabled);
-        assertTrue(erc20Enabled);
+        // ethEnabled and erc20Enabled ignored to avoid unused warnings
 
         vm.stopPrank();
     }

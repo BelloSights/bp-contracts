@@ -411,7 +411,82 @@ contract RewardPool is
         emit RewardClaimed(
             data.user,
             data.tokenAddress,
-            rewardAmount,
+            rewardAmount, // grossAmount
+            rewardAmount, // netAmount (no protocol fee in XP pool)
+            0, // protocolFee
+            data.tokenType,
+            s_userXP[data.user], // userShares
+            s_totalXP // totalShares
+        );
+    }
+
+    /// @notice Relayed claim entrypoint to allow third-parties (e.g., factory) to claim on behalf of a user
+    /// @dev Signature + nonce enforcement remains via signer.
+    function claimRewardFor(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external nonReentrant onlyActive {
+        // Verify the user is in the pool
+        if (!s_isUser[data.user]) revert RewardPool__UserNotInPool();
+
+        // Validate token parameters
+        if (data.tokenType == TokenType.NATIVE) {
+            if (data.tokenAddress != address(0))
+                revert RewardPool__InvalidTokenType();
+        } else if (data.tokenType == TokenType.ERC20) {
+            if (data.tokenAddress == address(0))
+                revert RewardPool__InvalidTokenType();
+        } else {
+            revert RewardPool__InvalidTokenType();
+        }
+
+        // Prevent double-claim
+        if (s_hasClaimed[data.user][data.tokenAddress][data.tokenType]) {
+            revert RewardPool__AlreadyClaimed();
+        }
+
+        // Verify signature and nonce
+        _validateSignature(data, signature);
+
+        // Calculate allocation
+        (bool canClaim, uint256 rewardAmount) = this.checkClaimEligibility(
+            data.user,
+            data.tokenAddress,
+            data.tokenType
+        );
+
+        if (!canClaim || rewardAmount == 0)
+            revert RewardPool__InsufficientRewards();
+
+        // Transfer funds to the user
+        if (data.tokenType == TokenType.NATIVE) {
+            if (address(this).balance < rewardAmount)
+                revert RewardPool__InsufficientPoolBalance();
+
+            (bool success, ) = payable(data.user).call{value: rewardAmount}("");
+            if (!success) revert RewardPool__TransferFailed();
+        } else if (data.tokenType == TokenType.ERC20) {
+            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(
+                address(this)
+            );
+            if (contractBalance < rewardAmount)
+                revert RewardPool__InsufficientPoolBalance();
+
+            IERC20(data.tokenAddress).transfer(data.user, rewardAmount);
+        } else {
+            revert RewardPool__InvalidTokenType();
+        }
+
+        // Mark as claimed and update totals
+        s_hasClaimed[data.user][data.tokenAddress][data.tokenType] = true;
+        s_totalClaimed[data.tokenAddress][data.tokenType] += rewardAmount;
+
+        emit RewardClaimed(
+            data.user,
+            data.tokenAddress,
+            rewardAmount, // grossAmount
+            rewardAmount, // netAmount (no protocol fee in XP pool)
+            0, // protocolFee
             data.tokenType,
             s_userXP[data.user],
             s_totalXP

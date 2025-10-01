@@ -7,7 +7,7 @@ endif
 # Load environment variables
 -include $(ENV_FILE)
 
-.PHONY: deploy test coverage build fork_test deploy_nft_factory upgrade_nft_factory verify_base_sepolia verify_base install-foundry-zksync deploy_nft_factory_zero verify_erc1155_implementation verify_blueprint_factory_implementation test-reward-pool deploy_reward_pool upgrade_reward_pool
+.PHONY: deploy test coverage build fork_test deploy_nft_factory upgrade_nft_factory verify_base_sepolia verify_base install-foundry-zksync deploy_nft_factory_zero verify_erc1155_implementation verify_blueprint_factory_implementation test-reward-pool deploy_reward_pool upgrade_reward_pool deploy_creator_reward_pool
 
 DEFAULT_ANVIL_PRIVATE_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -99,7 +99,61 @@ deploy_reward_pool:
 	@source $(ENV_FILE) && forge script script/DeployRewardPool.s.sol:DeployRewardPool $(NETWORK_ARGS) --ffi
 
 upgrade_reward_pool:
-	@source $(ENV_FILE) && forge script script/UpgradeRewardPool.s.sol:UpgradeRewardPool $(NETWORK_ARGS) --ffi
+	@source $(ENV_FILE) && \
+	  if [ -z "$${ETHERSCAN_API_KEY}" ] && [ -z "$${BASESCAN_API_KEY}" ]; then \
+	    echo "ERROR: No explorer API key found. Set BASESCAN_API_KEY (preferred for Base) or ETHERSCAN_API_KEY in $(ENV_FILE)."; \
+	    exit 1; \
+	  fi; \
+	  export ETHERSCAN_API_KEY=$${ETHERSCAN_API_KEY:-$${BASESCAN_API_KEY}} && \
+	  forge clean && forge build --build-info && \
+	  forge script script/UpgradeRewardPool.s.sol:UpgradeRewardPool $(NETWORK_ARGS) --ffi
+
+# Deploy CreatorRewardPool factory to selected network (Base mainnet with ARGS=--network base)
+deploy_creator_reward_pool:
+	@source $(ENV_FILE) && \
+	  export ETHERSCAN_API_KEY=$${ETHERSCAN_API_KEY:-$${BASESCAN_API_KEY}} && \
+	  forge script script/DeployCreatorRewardPool.s.sol:DeployCreatorRewardPool $(NETWORK_ARGS) --ffi
+
+# Verify CreatorRewardPool (implementation)
+verify_creator_reward_pool_impl:
+	@if [ -z "$(ADDRESS)" ]; then \
+		echo "Usage: make verify_creator_reward_pool_impl ADDRESS=0x..."; \
+		exit 1; \
+	fi; \
+	forge verify-contract \
+		$(ADDRESS) \
+		"src/reward-pool/CreatorRewardPool.sol:CreatorRewardPool" \
+		--chain-id 8453 \
+		--etherscan-api-key $(BASESCAN_API_KEY) \
+		--rpc-url $(BASE_MAINNET_RPC)
+
+# Verify CreatorRewardPoolFactory (implementation)
+verify_creator_reward_pool_factory_impl:
+	@if [ -z "$(ADDRESS)" ]; then \
+		echo "Usage: make verify_creator_reward_pool_factory_impl ADDRESS=0x..."; \
+		exit 1; \
+	fi; \
+	forge verify-contract \
+		$(ADDRESS) \
+		"src/reward-pool/CreatorRewardPoolFactory.sol:CreatorRewardPoolFactory" \
+		--chain-id 8453 \
+		--etherscan-api-key $(BASESCAN_API_KEY) \
+		--rpc-url $(BASE_MAINNET_RPC)
+
+# Verify CreatorRewardPoolFactory (proxy)
+verify_creator_reward_pool_factory_proxy:
+	@if [ -z "$(PROXY)" ] || [ -z "$(IMPL)" ] || [ -z "$(DEPLOYER)" ] || [ -z "$(POOL_IMPL)" ]; then \
+		echo "Usage: make verify_creator_reward_pool_factory_proxy PROXY=0x... IMPL=0x... DEPLOYER=0x... POOL_IMPL=0x..."; \
+		echo "Where: IMPL is factory implementation, POOL_IMPL is CreatorRewardPool implementation"; \
+		exit 1; \
+	fi; \
+	forge verify-contract \
+		$(PROXY) \
+		"lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy" \
+		--chain-id 8453 \
+		--etherscan-api-key $(BASESCAN_API_KEY) \
+		--rpc-url $(BASE_MAINNET_RPC) \
+		--constructor-args $$(cast abi-encode "constructor(address,bytes)" $(IMPL) $$(cast calldata "initialize(address,address)" $(DEPLOYER) $(POOL_IMPL)))
 
 upgrade_nft_factory:
 	@source $(ENV_FILE) && forge script script/UpgradeBlueprintNFT.s.sol:UpgradeBlueprintNFT $(NETWORK_ARGS) \

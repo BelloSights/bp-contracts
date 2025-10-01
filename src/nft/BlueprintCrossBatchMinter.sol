@@ -24,11 +24,11 @@ import "./BlueprintERC1155.sol";
  * Perfect for shopping cart experiences where users want to mint from multiple collections at once.
  * @custom:oz-upgrades-from BlueprintCrossBatchMinter
  */
-contract BlueprintCrossBatchMinter is 
-    Initializable, 
-    AccessControlUpgradeable, 
-    UUPSUpgradeable, 
-    ReentrancyGuardUpgradeable 
+contract BlueprintCrossBatchMinter is
+    Initializable,
+    AccessControlUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable
 {
     using SafeERC20 for IERC20;
 
@@ -36,12 +36,21 @@ contract BlueprintCrossBatchMinter is
     error BlueprintCrossBatchMinter__InvalidArrayLength();
     error BlueprintCrossBatchMinter__InvalidCollection(address collection);
     error BlueprintCrossBatchMinter__ZeroAmount();
-    error BlueprintCrossBatchMinter__InsufficientPayment(uint256 required, uint256 provided);
+    error BlueprintCrossBatchMinter__InsufficientPayment(
+        uint256 required,
+        uint256 provided
+    );
     error BlueprintCrossBatchMinter__MixedPaymentMethods();
     error BlueprintCrossBatchMinter__RefundFailed();
     error BlueprintCrossBatchMinter__InvalidFactory();
-    error BlueprintCrossBatchMinter__InsufficientERC20Balance(uint256 required, uint256 balance);
-    error BlueprintCrossBatchMinter__InsufficientERC20Allowance(uint256 required, uint256 allowance);
+    error BlueprintCrossBatchMinter__InsufficientERC20Balance(
+        uint256 required,
+        uint256 balance
+    );
+    error BlueprintCrossBatchMinter__InsufficientERC20Allowance(
+        uint256 required,
+        uint256 allowance
+    );
     error BlueprintCrossBatchMinter__DropNotActive();
     error BlueprintCrossBatchMinter__DropNotStarted();
     error BlueprintCrossBatchMinter__DropEnded();
@@ -54,9 +63,9 @@ contract BlueprintCrossBatchMinter is
 
     // ===== STRUCTS =====
     struct BatchMintItem {
-        address collection;     // Address of the BlueprintERC1155 collection
-        uint256 tokenId;       // Token ID to mint
-        uint256 amount;        // Amount to mint
+        address collection; // Address of the BlueprintERC1155 collection
+        uint256 tokenId; // Token ID to mint
+        uint256 amount; // Amount to mint
     }
 
     struct PaymentInfo {
@@ -134,10 +143,7 @@ contract BlueprintCrossBatchMinter is
      * @param _factory Address of the BlueprintERC1155Factory
      * @param _admin Admin address with full control
      */
-    function initialize(
-        address _factory,
-        address _admin
-    ) public initializer {
+    function initialize(address _factory, address _admin) public initializer {
         __AccessControl_init();
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
@@ -156,17 +162,17 @@ contract BlueprintCrossBatchMinter is
      * @dev Authorizes an upgrade to a new implementation
      * @param newImplementation Address of the new implementation
      */
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyRole(UPGRADER_ROLE)
-    {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 
     /**
      * @dev Updates the factory address (admin only)
      * @param _factory New factory address
      */
-    function setFactory(address _factory) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setFactory(
+        address _factory
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_factory == address(0)) {
             revert BlueprintCrossBatchMinter__InvalidFactory();
         }
@@ -187,15 +193,10 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Analyze payment requirements and validate all items
-        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(items, true); // ETH mode
-
-        if (paymentInfo.mixedPaymentMethods) {
-            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
-        }
-
-        if (!paymentInfo.hasETHPayments) {
-            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
-        }
+        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(
+            items,
+            true
+        ); // ETH mode
 
         if (msg.value < paymentInfo.totalETHRequired) {
             revert BlueprintCrossBatchMinter__InsufficientPayment(
@@ -205,7 +206,10 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Group items by collection for efficient batch processing
-        CollectionMintData[] memory collectionData = _groupItemsByCollection(items, true);
+        CollectionMintData[] memory collectionData = _groupItemsByCollection(
+            items,
+            true
+        );
 
         // Execute mints for each collection
         _executeBatchMints(to, collectionData, true, address(0));
@@ -245,19 +249,10 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Analyze payment requirements and validate all items
-        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(items, false); // ERC20 mode
-
-        if (paymentInfo.mixedPaymentMethods) {
-            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
-        }
-
-        if (!paymentInfo.hasERC20Payments) {
-            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
-        }
-
-        if (paymentInfo.erc20Token != erc20Token) {
-            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
-        }
+        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(
+            items,
+            false
+        ); // ERC20 mode
 
         IERC20 token = IERC20(erc20Token);
 
@@ -279,7 +274,10 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Group items by collection for efficient batch processing
-        CollectionMintData[] memory collectionData = _groupItemsByCollection(items, false);
+        CollectionMintData[] memory collectionData = _groupItemsByCollection(
+            items,
+            false
+        );
 
         // Execute mints for each collection
         _executeBatchMints(to, collectionData, false, erc20Token);
@@ -311,7 +309,10 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Analyze payment requirements for mixed mode
-        MixedPaymentInfo memory paymentInfo = _analyzeMixedPaymentRequirements(items, erc20Tokens);
+        MixedPaymentInfo memory paymentInfo = _analyzeMixedPaymentRequirements(
+            items,
+            erc20Tokens
+        );
 
         // Validate ETH payment
         if (msg.value < paymentInfo.totalETHRequired) {
@@ -326,21 +327,28 @@ contract BlueprintCrossBatchMinter is
             ERC20Requirement memory req = paymentInfo.erc20Requirements[i];
             if (req.amount > 0) {
                 IERC20 token = IERC20(req.token);
-                
+
                 uint256 userBalance = token.balanceOf(msg.sender);
                 if (userBalance < req.amount) {
-                    revert BlueprintCrossBatchMinter__InsufficientERC20Balance(req.amount, userBalance);
+                    revert BlueprintCrossBatchMinter__InsufficientERC20Balance(
+                        req.amount,
+                        userBalance
+                    );
                 }
 
                 uint256 allowance = token.allowance(msg.sender, address(this));
                 if (allowance < req.amount) {
-                    revert BlueprintCrossBatchMinter__InsufficientERC20Allowance(req.amount, allowance);
+                    revert BlueprintCrossBatchMinter__InsufficientERC20Allowance(
+                        req.amount,
+                        allowance
+                    );
                 }
             }
         }
 
         // Group items by collection and payment method
-        MixedCollectionData[] memory collectionData = _groupItemsByCollectionMixed(items);
+        MixedCollectionData[]
+            memory collectionData = _groupItemsByCollectionMixed(items);
 
         // Execute mints for each collection with appropriate payment method
         _executeMixedBatchMints(to, collectionData, paymentInfo);
@@ -375,16 +383,18 @@ contract BlueprintCrossBatchMinter is
     function getPaymentEstimate(
         BatchMintItem[] calldata items,
         bool useETH
-    ) external view returns (
-        uint256 totalPayment,
-        address paymentToken,
-        bool isValid
-    ) {
+    )
+        external
+        view
+        returns (uint256 totalPayment, address paymentToken, bool isValid)
+    {
         if (items.length == 0) {
             return (0, address(0), false);
         }
 
-        try this._analyzePaymentRequirementsView(items, useETH) returns (PaymentInfo memory info) {
+        try this._analyzePaymentRequirementsView(items, useETH) returns (
+            PaymentInfo memory info
+        ) {
             isValid = !info.mixedPaymentMethods;
             if (useETH) {
                 totalPayment = info.totalETHRequired;
@@ -421,26 +431,28 @@ contract BlueprintCrossBatchMinter is
         bool useETH
     ) internal view returns (PaymentInfo memory) {
         PaymentInfo memory info;
-        
+
         // First pass: validate basic requirements and collect payment method information
         bool hasETHOnlyDrops = false;
         bool hasERC20OnlyDrops = false;
         bool hasMixedDrops = false;
-        
+
         for (uint256 i = 0; i < items.length; i++) {
             BatchMintItem calldata item = items[i];
-            
+
             if (item.amount == 0) {
                 revert BlueprintCrossBatchMinter__ZeroAmount();
             }
 
             // Validate collection is deployed by factory
             if (!factory.isDeployedCollection(item.collection)) {
-                revert BlueprintCrossBatchMinter__InvalidCollection(item.collection);
+                revert BlueprintCrossBatchMinter__InvalidCollection(
+                    item.collection
+                );
             }
 
             BlueprintERC1155 collection = BlueprintERC1155(item.collection);
-            
+
             // Get drop information
             (
                 uint256 ethPrice,
@@ -467,7 +479,7 @@ contract BlueprintCrossBatchMinter is
             // Categorize payment methods
             bool supportsETH = ethEnabled;
             bool supportsERC20 = erc20Enabled && acceptedERC20 != address(0);
-            
+
             if (supportsETH && supportsERC20) {
                 hasMixedDrops = true;
             } else if (supportsETH && !supportsERC20) {
@@ -475,7 +487,7 @@ contract BlueprintCrossBatchMinter is
             } else if (!supportsETH && supportsERC20) {
                 hasERC20OnlyDrops = true;
             }
-            
+
             // Calculate payment amounts
             if (useETH) {
                 info.totalETHRequired += ethPrice * item.amount;
@@ -489,12 +501,12 @@ contract BlueprintCrossBatchMinter is
                         info.mixedPaymentMethods = true;
                     }
                 }
-                
+
                 info.totalERC20Required += erc20Price * item.amount;
                 info.hasERC20Payments = true;
             }
         }
-        
+
         // Determine if there are mixed payment methods
         if (useETH) {
             // For ETH mode, mixed methods occur only if we have drops that only support ERC20
@@ -503,15 +515,21 @@ contract BlueprintCrossBatchMinter is
             // For ERC20 mode, mixed methods occur only if we have drops that only support ETH
             info.mixedPaymentMethods = hasETHOnlyDrops;
         }
-        
+
         // Second pass: validate payment method compatibility if no mixed methods detected
         if (!info.mixedPaymentMethods) {
             for (uint256 i = 0; i < items.length; i++) {
                 BatchMintItem calldata item = items[i];
                 BlueprintERC1155 collection = BlueprintERC1155(item.collection);
-                
+
                 (
-                    ,,,,,, // skip other fields
+                    ,
+                    ,
+                    ,
+                    ,
+                    ,
+                    ,
+                    // skip other fields
                     bool ethEnabled,
                     bool erc20Enabled
                 ) = collection.drops(item.tokenId);
@@ -544,7 +562,7 @@ contract BlueprintCrossBatchMinter is
         // Count unique collections
         address[] memory uniqueCollections = new address[](items.length);
         uint256 uniqueCount = 0;
-        
+
         for (uint256 i = 0; i < items.length; i++) {
             bool found = false;
             for (uint256 j = 0; j < uniqueCount; j++) {
@@ -560,12 +578,14 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Create collection data array
-        CollectionMintData[] memory collectionData = new CollectionMintData[](uniqueCount);
-        
+        CollectionMintData[] memory collectionData = new CollectionMintData[](
+            uniqueCount
+        );
+
         // Group items by collection
         for (uint256 i = 0; i < uniqueCount; i++) {
             address collection = uniqueCollections[i];
-            
+
             // Count items for this collection
             uint256 itemCount = 0;
             for (uint256 j = 0; j < items.length; j++) {
@@ -573,38 +593,45 @@ contract BlueprintCrossBatchMinter is
                     itemCount++;
                 }
             }
-            
+
             // Create arrays for this collection
             uint256[] memory tokenIds = new uint256[](itemCount);
             uint256[] memory amounts = new uint256[](itemCount);
             uint256 ethPayment = 0;
             uint256 erc20Payment = 0;
-            
+
             // Fill arrays
             uint256 currentIndex = 0;
             for (uint256 j = 0; j < items.length; j++) {
                 if (items[j].collection == collection) {
                     tokenIds[currentIndex] = items[j].tokenId;
                     amounts[currentIndex] = items[j].amount;
-                    
+
                     // Calculate payment for this item
-                    BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+                    BlueprintERC1155 collectionContract = BlueprintERC1155(
+                        collection
+                    );
                     (
                         uint256 ethPrice,
                         uint256 erc20Price,
-                        ,,,,,
+                        ,
+                        ,
+                        ,
+                        ,
+                        ,
+
                     ) = collectionContract.drops(items[j].tokenId);
-                    
+
                     if (useETH) {
                         ethPayment += ethPrice * items[j].amount;
                     } else {
                         erc20Payment += erc20Price * items[j].amount;
                     }
-                    
+
                     currentIndex++;
                 }
             }
-            
+
             collectionData[i] = CollectionMintData({
                 collection: collection,
                 tokenIds: tokenIds,
@@ -613,7 +640,7 @@ contract BlueprintCrossBatchMinter is
                 erc20Payment: erc20Payment
             });
         }
-        
+
         return collectionData;
     }
 
@@ -633,7 +660,7 @@ contract BlueprintCrossBatchMinter is
         for (uint256 i = 0; i < collectionData.length; i++) {
             CollectionMintData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
-            
+
             if (useETH) {
                 // Use batchMint with ETH payment
                 collection.batchMint{value: data.ethPayment}(
@@ -649,17 +676,13 @@ contract BlueprintCrossBatchMinter is
                     address(this),
                     data.erc20Payment
                 );
-                
+
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
-                
+
                 // Use batchMintWithERC20
-                collection.batchMintWithERC20(
-                    to,
-                    data.tokenIds,
-                    data.amounts
-                );
-                
+                collection.batchMintWithERC20(to, data.tokenIds, data.amounts);
+
                 // Reset approval for security
                 token.forceApprove(data.collection, 0);
             }
@@ -689,16 +712,18 @@ contract BlueprintCrossBatchMinter is
         address user,
         BatchMintItem[] calldata items,
         bool useETH
-    ) external view returns (
-        bool canMint,
-        uint256 totalRequired,
-        address paymentToken
-    ) {
+    )
+        external
+        view
+        returns (bool canMint, uint256 totalRequired, address paymentToken)
+    {
         if (items.length == 0) {
             return (false, 0, address(0));
         }
 
-        try this._analyzePaymentRequirementsView(items, useETH) returns (PaymentInfo memory info) {
+        try this._analyzePaymentRequirementsView(items, useETH) returns (
+            PaymentInfo memory info
+        ) {
             if (info.mixedPaymentMethods) {
                 return (false, 0, address(0));
             }
@@ -716,12 +741,14 @@ contract BlueprintCrossBatchMinter is
                 }
                 totalRequired = info.totalERC20Required;
                 paymentToken = info.erc20Token;
-                
+
                 IERC20 token = IERC20(paymentToken);
                 uint256 userBalance = token.balanceOf(user);
                 uint256 allowance = token.allowance(user, address(this));
-                
-                canMint = userBalance >= totalRequired && allowance >= totalRequired;
+
+                canMint =
+                    userBalance >= totalRequired &&
+                    allowance >= totalRequired;
             }
         } catch {
             canMint = false;
@@ -731,12 +758,9 @@ contract BlueprintCrossBatchMinter is
     /**
      * @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(AccessControlUpgradeable)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 
@@ -754,7 +778,7 @@ contract BlueprintCrossBatchMinter is
     ) internal view returns (MixedPaymentInfo memory) {
         MixedPaymentInfo memory info;
         info.erc20Requirements = new ERC20Requirement[](erc20Tokens.length);
-        
+
         // Initialize ERC20 requirements
         for (uint256 i = 0; i < erc20Tokens.length; i++) {
             info.erc20Requirements[i] = ERC20Requirement({
@@ -765,18 +789,20 @@ contract BlueprintCrossBatchMinter is
 
         for (uint256 i = 0; i < items.length; i++) {
             BatchMintItem calldata item = items[i];
-            
+
             if (item.amount == 0) {
                 revert BlueprintCrossBatchMinter__ZeroAmount();
             }
 
             // Validate collection is deployed by factory
             if (!factory.isDeployedCollection(item.collection)) {
-                revert BlueprintCrossBatchMinter__InvalidCollection(item.collection);
+                revert BlueprintCrossBatchMinter__InvalidCollection(
+                    item.collection
+                );
             }
 
             BlueprintERC1155 collection = BlueprintERC1155(item.collection);
-            
+
             // Get drop information
             (
                 uint256 ethPrice,
@@ -802,8 +828,10 @@ contract BlueprintCrossBatchMinter is
 
             // Determine payment method for this drop
             bool useETH = ethEnabled && ethPrice > 0;
-            bool useERC20 = erc20Enabled && acceptedERC20 != address(0) && erc20Price > 0;
-            
+            bool useERC20 = erc20Enabled &&
+                acceptedERC20 != address(0) &&
+                erc20Price > 0;
+
             // Prefer ETH if both are available and ETH price exists
             if (useETH && (!useERC20 || ethPrice > 0)) {
                 info.totalETHRequired += ethPrice * item.amount;
@@ -812,7 +840,9 @@ contract BlueprintCrossBatchMinter is
                 bool found = false;
                 for (uint256 j = 0; j < info.erc20Requirements.length; j++) {
                     if (info.erc20Requirements[j].token == acceptedERC20) {
-                        info.erc20Requirements[j].amount += erc20Price * item.amount;
+                        info.erc20Requirements[j].amount +=
+                            erc20Price *
+                            item.amount;
                         found = true;
                         break;
                     }
@@ -839,7 +869,7 @@ contract BlueprintCrossBatchMinter is
         // Count unique collections
         address[] memory uniqueCollections = new address[](items.length);
         uint256 uniqueCount = 0;
-        
+
         for (uint256 i = 0; i < items.length; i++) {
             bool found = false;
             for (uint256 j = 0; j < uniqueCount; j++) {
@@ -855,12 +885,14 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Create collection data array
-        MixedCollectionData[] memory collectionData = new MixedCollectionData[](uniqueCount);
-        
+        MixedCollectionData[] memory collectionData = new MixedCollectionData[](
+            uniqueCount
+        );
+
         // Group items by collection
         for (uint256 i = 0; i < uniqueCount; i++) {
             address collection = uniqueCollections[i];
-            
+
             // Count items for this collection
             uint256 itemCount = 0;
             for (uint256 j = 0; j < items.length; j++) {
@@ -868,47 +900,53 @@ contract BlueprintCrossBatchMinter is
                     itemCount++;
                 }
             }
-            
+
             // Create arrays for this collection
             uint256[] memory tokenIds = new uint256[](itemCount);
             uint256[] memory amounts = new uint256[](itemCount);
             uint256 ethPayment = 0;
             uint256 erc20Payment = 0;
             address erc20Token = address(0);
-            
+
             // Fill arrays and determine payment method
             uint256 currentIndex = 0;
             for (uint256 j = 0; j < items.length; j++) {
                 if (items[j].collection == collection) {
                     tokenIds[currentIndex] = items[j].tokenId;
                     amounts[currentIndex] = items[j].amount;
-                    
+
                     // Get payment info for this item
-                    BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+                    BlueprintERC1155 collectionContract = BlueprintERC1155(
+                        collection
+                    );
                     (
                         uint256 ethPrice,
                         uint256 erc20Price,
                         address acceptedERC20,
-                        ,,,
+                        ,
+                        ,
+                        ,
                         bool ethEnabled,
                         bool erc20Enabled
                     ) = collectionContract.drops(items[j].tokenId);
-                    
+
                     // Determine payment method (prefer ETH if available)
                     bool useETH = ethEnabled && ethPrice > 0;
-                    bool useERC20 = erc20Enabled && acceptedERC20 != address(0) && erc20Price > 0;
-                    
+                    bool useERC20 = erc20Enabled &&
+                        acceptedERC20 != address(0) &&
+                        erc20Price > 0;
+
                     if (useETH && (!useERC20 || ethPrice > 0)) {
                         ethPayment += ethPrice * items[j].amount;
                     } else if (useERC20) {
                         erc20Payment += erc20Price * items[j].amount;
                         erc20Token = acceptedERC20;
                     }
-                    
+
                     currentIndex++;
                 }
             }
-            
+
             collectionData[i] = MixedCollectionData({
                 collection: collection,
                 tokenIds: tokenIds,
@@ -918,7 +956,7 @@ contract BlueprintCrossBatchMinter is
                 erc20Payment: erc20Payment
             });
         }
-        
+
         return collectionData;
     }
 
@@ -926,17 +964,16 @@ contract BlueprintCrossBatchMinter is
      * @dev Executes mixed batch mints with both ETH and ERC20 payments
      * @param to Recipient address
      * @param collectionData Array of collection mint data
-     * @param paymentInfo Payment information
      */
     function _executeMixedBatchMints(
         address to,
         MixedCollectionData[] memory collectionData,
-        MixedPaymentInfo memory paymentInfo
+        MixedPaymentInfo memory
     ) internal {
         for (uint256 i = 0; i < collectionData.length; i++) {
             MixedCollectionData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
-            
+
             if (data.ethPayment > 0) {
                 // Use ETH payment
                 collection.batchMint{value: data.ethPayment}(
@@ -952,17 +989,13 @@ contract BlueprintCrossBatchMinter is
                     address(this),
                     data.erc20Payment
                 );
-                
+
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
-                
+
                 // Use batchMintWithERC20
-                collection.batchMintWithERC20(
-                    to,
-                    data.tokenIds,
-                    data.amounts
-                );
-                
+                collection.batchMintWithERC20(to, data.tokenIds, data.amounts);
+
                 // Reset approval for security
                 token.forceApprove(data.collection, 0);
             }
@@ -990,16 +1023,22 @@ contract BlueprintCrossBatchMinter is
     function getMixedPaymentEstimate(
         BatchMintItem[] calldata items,
         address[] calldata erc20Tokens
-    ) external view returns (
-        uint256 ethRequired,
-        ERC20Requirement[] memory erc20Requirements,
-        bool isValid
-    ) {
+    )
+        external
+        view
+        returns (
+            uint256 ethRequired,
+            ERC20Requirement[] memory erc20Requirements,
+            bool isValid
+        )
+    {
         if (items.length == 0) {
             return (0, new ERC20Requirement[](0), false);
         }
 
-        try this._analyzeMixedPaymentRequirementsView(items, erc20Tokens) returns (MixedPaymentInfo memory info) {
+        try
+            this._analyzeMixedPaymentRequirementsView(items, erc20Tokens)
+        returns (MixedPaymentInfo memory info) {
             return (info.totalETHRequired, info.erc20Requirements, true);
         } catch {
             return (0, new ERC20Requirement[](0), false);
@@ -1015,4 +1054,4 @@ contract BlueprintCrossBatchMinter is
     ) external view returns (MixedPaymentInfo memory) {
         return _analyzeMixedPaymentRequirements(items, erc20Tokens);
     }
-} 
+}

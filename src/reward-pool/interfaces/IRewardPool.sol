@@ -76,6 +76,14 @@ interface IRewardPool {
         bytes calldata signature
     ) external;
 
+    /// @notice Claim rewards on behalf of a user (callable by factory only)
+    /// @param data Claim data struct
+    /// @param signature EIP-712 signature
+    function claimRewardFor(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external;
+
     // ===== VIEW FUNCTIONS =====
     function getUserXP(address user) external view returns (uint256);
     function isUser(address user) external view returns (bool);
@@ -121,10 +129,12 @@ interface IRewardPool {
     event RewardClaimed(
         address indexed user,
         address indexed tokenAddress,
-        uint256 amount,
+        uint256 grossAmount,
+        uint256 netAmount,
+        uint256 protocolFee,
         TokenType tokenType,
-        uint256 userXP,
-        uint256 totalXP
+        uint256 userShares,
+        uint256 totalShares
     );
 
     // ===== BATCH EVENTS =====

@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     include: ['**/*.test.ts'],
     globals: true,
-    testTimeout: 300000 // Increase timeout to 5 minutes (300,000ms)
+    testTimeout: 300000, // Increase timeout to 5 minutes (300,000ms)
+    environment: 'node',
+    reporters: 'verbose',
+    silent: false,
   }
 })

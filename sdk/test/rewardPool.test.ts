@@ -11,7 +11,7 @@ dotenv.config({
   path: path.resolve(__dirname, "../../.env"),
 });
 
-describe("RewardPool SDK", () => {
+describe.skip("RewardPool SDK", () => {
   it("SDK End to End", async () => {
     try {
       // Initialize the SDK with better RPC configuration

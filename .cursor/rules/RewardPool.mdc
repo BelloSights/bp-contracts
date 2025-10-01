@@ -420,7 +420,7 @@ export enum TokenType {
 ### ABI Exports
 
 ```typescript
-import { rewardpoolfactoryAbi, rewardpoolAbi } from "./abis";
+import { rewardPoolFactoryAbi, rewardpoolAbi } from "./abis";
 ```
 
 ### Batch Operations SDK Methods
@@ -630,7 +630,7 @@ make upgrade_reward_pool ARGS="--network base_sepolia"
 
 ```bash
 # Export ABIs to SDK (updated with batch operations)
-jq '.abi' out/RewardPoolFactory.sol/RewardPoolFactory.json > sdk/abis/rewardpoolfactoryAbi.ts
+jq '.abi' out/RewardPoolFactory.sol/RewardPoolFactory.json > sdk/abis/rewardPoolFactoryAbi.ts
 jq '.abi' out/RewardPool.sol/RewardPool.json > sdk/abis/rewardpoolAbi.ts
 
 # Current ABI stats:
@@ -656,7 +656,7 @@ jq '.abi' out/RewardPool.sol/RewardPool.json > sdk/abis/rewardpoolAbi.ts
 1. **Prefer batch operations** for multiple users (use `batchAddUsers`, `batchUpdateUserXP`, `batchPenalizeUsers`)
 2. Always validate tokenAddress/tokenType combinations
 3. Use correct TokenType enum values (ERC20=0, NATIVE=1)
-4. Use updated ABI imports (`rewardpoolAbi`, `rewardpoolfactoryAbi`)
+4. Use updated ABI imports (`rewardpoolAbi`, `rewardPoolFactoryAbi`)
 5. Always check claim eligibility before attempting claims
 6. Use `getNextNonce()` for new claims
 7. Handle nonce conflicts gracefully
@@ -732,7 +732,7 @@ SnapshotTaken(address tokenAddress, uint256 amount, TokenType tokenType)
 1. **Batch operations added**: New `batchAddUsers`, `batchUpdateUserXP`, `batchPenalizeUsers` functions
 2. **Contract addresses updated**: New factory at `0xc48aCE45Daa10f5c88D196656931d54b42EFF838`
 3. **Shared implementation**: Gas-efficient pool creation using clone pattern
-4. **ABI naming updated**: Use `rewardpoolAbi` and `rewardpoolfactoryAbi` (lowercase)
+4. **ABI naming updated**: Use `rewardpoolAbi` and `rewardPoolFactoryAbi` (lowercase)
 5. **Production scale validated**: Successfully tested up to 20,000 users
 6. **Enhanced validation**: Stricter tokenAddress/tokenType combination checking
 7. **Self-claiming enforced**: Users must claim for themselves
@@ -740,7 +740,7 @@ SnapshotTaken(address tokenAddress, uint256 amount, TokenType tokenType)
 
 ### Breaking Changes
 
-- **ABI naming convention**: `rewardpoolAbi` and `rewardpoolfactoryAbi` (lowercase)
+- **ABI naming convention**: `rewardpoolAbi` and `rewardPoolFactoryAbi` (lowercase)
 - **Factory address**: Updated to `0xc48aCE45Daa10f5c88D196656931d54b42EFF838`
 - **Batch operations**: New functions added for efficient bulk management
 - **Shared implementation**: Pool creation now uses clone pattern

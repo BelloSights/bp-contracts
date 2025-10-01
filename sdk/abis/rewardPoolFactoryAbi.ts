@@ -1,4 +1,4 @@
-export const rewardpoolfactoryAbi = [
+export const rewardPoolFactoryAbi = [
   {
     type: "constructor",
     inputs: [],
@@ -227,6 +227,31 @@ export const rewardpoolfactoryAbi = [
         type: "uint8",
         internalType: "enum IRewardPool.TokenType",
       },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "claimRewardFor",
+    inputs: [
+      { name: "poolId", type: "uint256", internalType: "uint256" },
+      {
+        name: "data",
+        type: "tuple",
+        internalType: "struct IRewardPool.ClaimData",
+        components: [
+          { name: "user", type: "address", internalType: "address" },
+          { name: "nonce", type: "uint256", internalType: "uint256" },
+          { name: "tokenAddress", type: "address", internalType: "address" },
+          {
+            name: "tokenType",
+            type: "uint8",
+            internalType: "enum IRewardPool.TokenType",
+          },
+        ],
+      },
+      { name: "signature", type: "bytes", internalType: "bytes" },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -1042,4 +1067,4 @@ export const rewardpoolfactoryAbi = [
   },
 ] as const;
 
-export default rewardpoolfactoryAbi;
+export default rewardPoolFactoryAbi;
