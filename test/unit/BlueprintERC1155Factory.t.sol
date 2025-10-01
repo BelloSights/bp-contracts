@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import "../../src/nft/BlueprintERC1155Factory.sol";
 import "../../src/nft/BlueprintERC1155.sol";
 import "@openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -1321,8 +1322,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint NFTs using batch-safe function
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             0,
             nftAmount,
@@ -1387,8 +1388,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint first drop
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             0,
             1,
@@ -1397,8 +1398,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 3. Mint second drop
         targets[2] = address(collectionContract);
-        datas[2] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[2] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             secondDropId,
             1,
@@ -1445,8 +1446,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Try to mint without approval (this should fail)
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             0,
             2, // Try to mint 2 but only approved for 1
@@ -1506,8 +1507,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint first drop (100 tokens)
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             0,
             1,
@@ -1516,8 +1517,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 3. Mint second drop (200 tokens)
         targets[2] = address(collectionContract);
-        datas[2] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[2] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             secondDropId,
             1,
@@ -1534,8 +1535,8 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 5. Mint first drop again (100 tokens)
         targets[4] = address(collectionContract);
-        datas[4] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[4] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,bool)",
             user1,
             0,
             1,
@@ -1710,6 +1711,270 @@ contract BlueprintERC1155FactoryTest is Test {
         vm.stopPrank();
     }
 
+    // ===== Referral Event Tests =====
+
+    function test_ReferralEvent_ETH_SingleMint_ReferredAndNoRef() public {
+        // Setup collection and drop
+        test_CreateCollection();
+        vm.startPrank(admin);
+        dropId = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        vm.stopPrank();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        address referrer = address(0xABCD);
+
+        // Referred path should emit ReferredMint
+        vm.startPrank(user1);
+        vm.deal(user1, 2 ether);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            dropId,
+            1,
+            address(0),
+            defaultMintFee,
+            block.timestamp
+        );
+        collectionContract.mint{value: defaultMintFee}(
+            user1,
+            dropId,
+            1,
+            referrer
+        );
+
+        // Non-referred path should NOT emit ReferredMint
+        vm.recordLogs();
+        collectionContract.mint{value: defaultMintFee}(user1, dropId, 1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_ERC20_SingleMint_ReferredAndNoRef() public {
+        // Setup ERC20 drop
+        test_CreateDropWithERC20();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Fund user and approve
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        vm.startPrank(user1);
+        uint256 erc20Price = 100 * 10 ** 18;
+        mockERC20.approve(collection, erc20Price * 2);
+
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        address referrer = address(0xBEEF);
+
+        // Referred path should emit ReferredMint
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            erc20Price,
+            block.timestamp
+        );
+        collectionContract.mintWithERC20(user1, 0, 1, referrer);
+
+        // Non-referred path should NOT emit ReferredMint
+        vm.recordLogs();
+        collectionContract.mintWithERC20(user1, 0, 1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred ERC20 mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_Batch_ETH_ReferredAndNoRef() public {
+        // Setup two ETH drops
+        test_CreateCollection();
+        vm.startPrank(admin);
+        uint256 firstDrop = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        uint256 secondDrop = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        vm.startPrank(user1);
+        vm.deal(user1, 10 ether);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        uint256[] memory tokenIds = new uint256[](2);
+        tokenIds[0] = firstDrop;
+        tokenIds[1] = secondDrop;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1;
+        amounts[1] = 2;
+        uint256 totalCost = defaultMintFee * 3;
+        address referrer = address(0xCAFE);
+
+        // Referred batch
+        vm.expectEmit(true, true, true, true);
+        emit ReferredBatchMint(
+            user1,
+            referrer,
+            user1,
+            tokenIds,
+            amounts,
+            address(0),
+            totalCost,
+            block.timestamp
+        );
+        collectionContract.batchMint{value: totalCost}(
+            user1,
+            tokenIds,
+            amounts,
+            referrer
+        );
+
+        // Non-referred batch should NOT emit ReferredBatchMint
+        vm.recordLogs();
+        collectionContract.batchMint{value: totalCost}(
+            user1,
+            tokenIds,
+            amounts
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredBatchMint = keccak256(
+            "ReferredBatchMint(address,address,address,uint256[],uint256[],address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredBatchMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredBatchMint should not be emitted for non-referred ETH batch mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_ERC20_BatchSafe_ReferredAndNoRef() public {
+        // Setup ERC20 drop
+        test_CreateDropWithERC20();
+        vm.warp(block.timestamp + 2 days);
+
+        // Fund and approve user
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        vm.startPrank(user1);
+        uint256 erc20Price = 100 * 10 ** 18;
+        mockERC20.approve(collection, erc20Price * 2);
+
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        address referrer = address(0xDEAD);
+
+        // Referred path
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            erc20Price,
+            block.timestamp
+        );
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            false,
+            referrer
+        );
+
+        // Non-referred path should NOT emit referral
+        vm.recordLogs();
+        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, false);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred batch-safe mint"
+        );
+
+        vm.stopPrank();
+    }
+
     function test_BatchEnhancedEventsETH() public {
         test_CreateCollection();
 
@@ -1809,6 +2074,28 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256[] amounts,
         address indexed paymentToken,
         uint256 totalAmountPaidWei,
+        uint256 timestamp
+    );
+
+    event ReferredMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256 tokenId,
+        uint256 amount,
+        address paymentToken,
+        uint256 amountPaidWeiOrTokenUnits,
+        uint256 timestamp
+    );
+
+    event ReferredBatchMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts,
+        address paymentToken,
+        uint256 totalAmountPaidWeiOrTokenUnits,
         uint256 timestamp
     );
 }

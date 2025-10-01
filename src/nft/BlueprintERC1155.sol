@@ -161,6 +161,27 @@ contract BlueprintERC1155 is
         uint256 totalAmountPaidWei, // total amount paid in wei (for ETH) or token units (for ERC20)
         uint256 timestamp
     );
+    // Referral events for indexing when a referrer is provided by the caller
+    event ReferredMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256 tokenId,
+        uint256 amount,
+        address paymentToken, // address(0) for ETH
+        uint256 amountPaidWeiOrTokenUnits,
+        uint256 timestamp
+    );
+    event ReferredBatchMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts,
+        address paymentToken, // address(0) for ETH
+        uint256 totalAmountPaidWeiOrTokenUnits,
+        uint256 timestamp
+    );
     event FeeConfigUpdated(
         address blueprintRecipient,
         uint256 blueprintFeeBasisPoints,
@@ -564,6 +585,176 @@ contract BlueprintERC1155 is
         uint256 tokenId,
         uint256 amount
     ) external payable nonReentrant {
+        _mintETHInternal(to, tokenId, amount, address(0));
+    }
+
+    /**
+     * @dev Public minting function with optional referrer for indexing purposes (ETH payments)
+     *      Logic is identical to {mint} with an extra referral event when referrer != address(0)
+     * @param to Recipient address
+     * @param tokenId Token ID to mint
+     * @param amount Number of tokens to mint
+     * @param referrer Address of the referrer (set to address(0) if none)
+     */
+    function mint(
+        address to,
+        uint256 tokenId,
+        uint256 amount,
+        address referrer
+    ) external payable nonReentrant {
+        _mintETHInternal(to, tokenId, amount, referrer);
+    }
+
+    /**
+     * @dev Public minting function with ERC20 payment handling and fee distribution
+     * @param to Recipient address
+     * @param tokenId Token ID to mint
+     * @param amount Number of tokens to mint
+     */
+    function mintWithERC20(
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external nonReentrant {
+        _mintERC20Internal(to, tokenId, amount, address(0));
+    }
+
+    /**
+     * @dev Public minting function with ERC20 payment and optional referrer for indexing
+     *      Logic is identical to {mintWithERC20} with an extra referral event when referrer != address(0)
+     * @param to Recipient address
+     * @param tokenId Token ID to mint
+     * @param amount Number of tokens to mint
+     * @param referrer Address of the referrer (set to address(0) if none)
+     */
+    function mintWithERC20(
+        address to,
+        uint256 tokenId,
+        uint256 amount,
+        address referrer
+    ) external nonReentrant {
+        _mintERC20Internal(to, tokenId, amount, referrer);
+    }
+
+    /**
+     * @dev Public batch minting function with payment handling and fee distribution
+     * @param to Recipient address
+     * @param tokenIds Array of token IDs to mint
+     * @param amounts Array of token amounts to mint
+     */
+    function batchMint(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external payable nonReentrant {
+        _batchMintETHInternal(to, tokenIds, amounts, address(0));
+    }
+
+    /**
+     * @dev Public batch minting with ETH and optional referrer for indexing
+     *      Logic is identical to {batchMint} with an extra referral event when referrer != address(0)
+     * @param to Recipient address
+     * @param tokenIds Array of token IDs to mint
+     * @param amounts Array of token amounts to mint
+     * @param referrer Address of the referrer (set to address(0) if none)
+     */
+    function batchMint(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts,
+        address referrer
+    ) external payable nonReentrant {
+        _batchMintETHInternal(to, tokenIds, amounts, referrer);
+    }
+
+    /**
+     * @dev Public batch minting function with ERC20 payment handling and fee distribution
+     * @param to Recipient address
+     * @param tokenIds Array of token IDs to mint
+     * @param amounts Array of token amounts to mint
+     */
+    function batchMintWithERC20(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external nonReentrant {
+        _batchMintERC20Internal(to, tokenIds, amounts, address(0));
+    }
+
+    /**
+     * @dev Public batch minting with ERC20 and optional referrer for indexing
+     *      Logic is identical to {batchMintWithERC20} with an extra referral event when referrer != address(0)
+     * @param to Recipient address
+     * @param tokenIds Array of token IDs to mint
+     * @param amounts Array of token amounts to mint
+     * @param referrer Address of the referrer (set to address(0) if none)
+     */
+    function batchMintWithERC20(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts,
+        address referrer
+    ) external nonReentrant {
+        _batchMintERC20Internal(to, tokenIds, amounts, referrer);
+    }
+
+    /**
+     * @dev EIP-5792 compatible batch-friendly ERC20 mint function with enhanced safeguards
+     * Designed to work optimally with batch transactions that include approval + mint
+     * Protects against fee-on-transfer tokens and other weird ERC20 behaviors
+     * @param to Recipient address
+     * @param tokenId Token ID to mint
+     * @param amount Number of tokens to mint
+     * @param allowFeeOnTransfer Whether to allow fee-on-transfer tokens (if false, reverts on any fee)
+     */
+    function mintWithERC20BatchSafe(
+        address to,
+        uint256 tokenId,
+        uint256 amount,
+        bool allowFeeOnTransfer
+    ) external nonReentrant {
+        _mintERC20BatchSafeInternal(
+            to,
+            tokenId,
+            amount,
+            allowFeeOnTransfer,
+            address(0)
+        );
+    }
+
+    /**
+     * @dev EIP-5792 compatible ERC20 mint with optional referrer for indexing and enhanced safeguards
+     *      Logic is identical to {mintWithERC20BatchSafe} with an extra referral event when referrer != address(0)
+     * @param to Recipient address
+     * @param tokenId Token ID to mint
+     * @param amount Number of tokens to mint
+     * @param allowFeeOnTransfer Whether to allow fee-on-transfer tokens
+     * @param referrer Address of the referrer (set to address(0) if none)
+     */
+    function mintWithERC20BatchSafe(
+        address to,
+        uint256 tokenId,
+        uint256 amount,
+        bool allowFeeOnTransfer,
+        address referrer
+    ) external nonReentrant {
+        _mintERC20BatchSafeInternal(
+            to,
+            tokenId,
+            amount,
+            allowFeeOnTransfer,
+            referrer
+        );
+    }
+
+    // ===== Internal helpers to reduce duplication =====
+
+    function _mintETHInternal(
+        address to,
+        uint256 tokenId,
+        uint256 amount,
+        address referrer
+    ) internal {
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -588,16 +779,10 @@ contract BlueprintERC1155 is
 
         _mint(to, tokenId, amount, "");
 
-        // Update total supply for the token ID
         _totalSupply[tokenId] += amount;
-
-        // Update global total supply
         _globalTotalSupply += amount;
 
-        // Get the appropriate fee config for this token
         FeeConfig memory feeConfig = getFeeConfig(tokenId);
-
-        // Validate essential recipients
         if (feeConfig.blueprintRecipient == address(0)) {
             revert BlueprintERC1155__ZeroBlueprintRecipient();
         }
@@ -605,7 +790,6 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        // Handle fee distribution
         uint256 totalPrice = drop.price * amount;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
@@ -615,7 +799,6 @@ contract BlueprintERC1155 is
             10000;
         uint256 treasuryAmount = totalPrice - platformFee - creatorFee;
 
-        // Send platform fee
         (bool feeSuccess, ) = feeConfig.blueprintRecipient.call{
             value: platformFee
         }("");
@@ -623,7 +806,6 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__BlueprintFeeTransferFailed();
         }
 
-        // Send creator fee
         (bool creatorSuccess, ) = feeConfig.creatorRecipient.call{
             value: creatorFee
         }("");
@@ -631,7 +813,6 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__CreatorFeeTransferFailed();
         }
 
-        // Send reward pool fee if recipient is set, otherwise it goes to treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             (bool rewardPoolSuccess, ) = feeConfig.rewardPoolRecipient.call{
                 value: rewardPoolFee
@@ -639,11 +820,9 @@ contract BlueprintERC1155 is
             if (!rewardPoolSuccess) {
                 revert BlueprintERC1155__RewardPoolFeeTransferFailed();
             }
-            // Subtract reward pool fee from treasury amount since it was sent
             treasuryAmount -= rewardPoolFee;
         }
 
-        // Send remaining amount to treasury if set
         if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
             (bool treasurySuccess, ) = feeConfig.treasury.call{
                 value: treasuryAmount
@@ -653,7 +832,6 @@ contract BlueprintERC1155 is
             }
         }
 
-        // Refund excess payment if any
         if (msg.value > totalPrice) {
             uint256 refund = msg.value - totalPrice;
             (bool refundSuccess, ) = msg.sender.call{value: refund}("");
@@ -671,19 +849,26 @@ contract BlueprintERC1155 is
             totalPrice,
             block.timestamp
         );
+        if (referrer != address(0)) {
+            emit ReferredMint(
+                msg.sender,
+                referrer,
+                to,
+                tokenId,
+                amount,
+                address(0),
+                totalPrice,
+                block.timestamp
+            );
+        }
     }
 
-    /**
-     * @dev Public minting function with ERC20 payment handling and fee distribution
-     * @param to Recipient address
-     * @param tokenId Token ID to mint
-     * @param amount Number of tokens to mint
-     */
-    function mintWithERC20(
+    function _mintERC20Internal(
         address to,
         uint256 tokenId,
-        uint256 amount
-    ) external nonReentrant {
+        uint256 amount,
+        address referrer
+    ) internal {
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -704,7 +889,6 @@ contract BlueprintERC1155 is
         uint256 requiredPayment = drop.erc20Price * amount;
         IERC20 erc20Token = IERC20(drop.acceptedERC20);
 
-        // Check user balance
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Balance(
@@ -713,7 +897,6 @@ contract BlueprintERC1155 is
             );
         }
 
-        // Check allowance
         uint256 allowance = erc20Token.allowance(msg.sender, address(this));
         if (allowance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Allowance(
@@ -724,16 +907,10 @@ contract BlueprintERC1155 is
 
         _mint(to, tokenId, amount, "");
 
-        // Update total supply for the token ID
         _totalSupply[tokenId] += amount;
-
-        // Update global total supply
         _globalTotalSupply += amount;
 
-        // Get the appropriate fee config for this token
         FeeConfig memory feeConfig = getFeeConfig(tokenId);
-
-        // Validate essential recipients
         if (feeConfig.blueprintRecipient == address(0)) {
             revert BlueprintERC1155__ZeroBlueprintRecipient();
         }
@@ -741,7 +918,6 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        // Handle ERC20 fee distribution
         uint256 totalPrice = drop.erc20Price * amount;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
@@ -751,32 +927,26 @@ contract BlueprintERC1155 is
             10000;
         uint256 treasuryAmount = totalPrice - platformFee - creatorFee;
 
-        // Transfer platform fee
         erc20Token.safeTransferFrom(
             msg.sender,
             feeConfig.blueprintRecipient,
             platformFee
         );
-
-        // Transfer creator fee
         erc20Token.safeTransferFrom(
             msg.sender,
             feeConfig.creatorRecipient,
             creatorFee
         );
 
-        // Transfer reward pool fee if recipient is set, otherwise it goes to treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             erc20Token.safeTransferFrom(
                 msg.sender,
                 feeConfig.rewardPoolRecipient,
                 rewardPoolFee
             );
-            // Subtract reward pool fee from treasury amount since it was sent
             treasuryAmount -= rewardPoolFee;
         }
 
-        // Transfer remaining amount to treasury if set
         if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
             erc20Token.safeTransferFrom(
                 msg.sender,
@@ -794,26 +964,31 @@ contract BlueprintERC1155 is
             totalPrice,
             block.timestamp
         );
+        if (referrer != address(0)) {
+            emit ReferredMint(
+                msg.sender,
+                referrer,
+                to,
+                tokenId,
+                amount,
+                drop.acceptedERC20,
+                totalPrice,
+                block.timestamp
+            );
+        }
     }
 
-    /**
-     * @dev Public batch minting function with payment handling and fee distribution
-     * @param to Recipient address
-     * @param tokenIds Array of token IDs to mint
-     * @param amounts Array of token amounts to mint
-     */
-    function batchMint(
+    function _batchMintETHInternal(
         address to,
         uint256[] memory tokenIds,
-        uint256[] memory amounts
-    ) external payable nonReentrant {
+        uint256[] memory amounts,
+        address referrer
+    ) internal {
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
 
         uint256 requiredPayment = 0;
-
-        // Calculate required payment and validate drops
         for (uint256 i = 0; i < tokenIds.length; i++) {
             Drop memory drop = drops[tokenIds[i]];
             if (!drop.active) {
@@ -828,7 +1003,6 @@ contract BlueprintERC1155 is
             if (block.timestamp > drop.endTime && drop.endTime != 0) {
                 revert BlueprintERC1155__DropEnded();
             }
-
             requiredPayment += drop.price * amounts[i];
         }
 
@@ -841,34 +1015,23 @@ contract BlueprintERC1155 is
 
         _mintBatch(to, tokenIds, amounts, "");
 
-        // Update total supplies
         uint256 totalAmount = 0;
         for (uint256 i = 0; i < tokenIds.length; i++) {
             _totalSupply[tokenIds[i]] += amounts[i];
             totalAmount += amounts[i];
         }
-
-        // Update global total supply
         _globalTotalSupply += totalAmount;
 
-        // Process payments for each token
-        uint256 totalProcessed = 0;
         for (uint256 i = 0; i < tokenIds.length; i++) {
             Drop memory drop = drops[tokenIds[i]];
             uint256 payment = drop.price * amounts[i];
-
-            // Get fee config for this token
             FeeConfig memory config = getFeeConfig(tokenIds[i]);
-
-            // Validate essential recipients
             if (config.blueprintRecipient == address(0)) {
                 revert BlueprintERC1155__ZeroBlueprintRecipient();
             }
             if (config.creatorRecipient == address(0)) {
                 revert BlueprintERC1155__ZeroCreatorRecipient();
             }
-
-            // Calculate fees
             uint256 platformFee = (payment * config.blueprintFeeBasisPoints) /
                 10000;
             uint256 creatorFee = (payment * config.creatorBasisPoints) / 10000;
@@ -876,23 +1039,18 @@ contract BlueprintERC1155 is
                 10000;
             uint256 treasuryAmount = payment - platformFee - creatorFee;
 
-            // Send platform fee
             (bool feeSuccess, ) = config.blueprintRecipient.call{
                 value: platformFee
             }("");
             if (!feeSuccess) {
                 revert BlueprintERC1155__BlueprintFeeTransferFailed();
             }
-
-            // Send creator fee
             (bool creatorSuccess, ) = config.creatorRecipient.call{
                 value: creatorFee
             }("");
             if (!creatorSuccess) {
                 revert BlueprintERC1155__CreatorFeeTransferFailed();
             }
-
-            // Send reward pool fee if recipient is set, otherwise it goes to treasury
             if (rewardPoolFee > 0 && config.rewardPoolRecipient != address(0)) {
                 (bool rewardPoolSuccess, ) = config.rewardPoolRecipient.call{
                     value: rewardPoolFee
@@ -900,11 +1058,8 @@ contract BlueprintERC1155 is
                 if (!rewardPoolSuccess) {
                     revert BlueprintERC1155__RewardPoolFeeTransferFailed();
                 }
-                // Subtract reward pool fee from treasury amount since it was sent
                 treasuryAmount -= rewardPoolFee;
             }
-
-            // Send treasury amount
             if (treasuryAmount > 0 && config.treasury != address(0)) {
                 (bool treasurySuccess, ) = config.treasury.call{
                     value: treasuryAmount
@@ -913,11 +1068,8 @@ contract BlueprintERC1155 is
                     revert BlueprintERC1155__TreasuryTransferFailed();
                 }
             }
-
-            totalProcessed += payment;
         }
 
-        // Refund excess payment if any
         if (msg.value > requiredPayment) {
             uint256 refund = msg.value - requiredPayment;
             (bool refundSuccess, ) = msg.sender.call{value: refund}("");
@@ -935,27 +1087,32 @@ contract BlueprintERC1155 is
             requiredPayment,
             block.timestamp
         );
+        if (referrer != address(0)) {
+            emit ReferredBatchMint(
+                msg.sender,
+                referrer,
+                to,
+                tokenIds,
+                amounts,
+                address(0),
+                requiredPayment,
+                block.timestamp
+            );
+        }
     }
 
-    /**
-     * @dev Public batch minting function with ERC20 payment handling and fee distribution
-     * @param to Recipient address
-     * @param tokenIds Array of token IDs to mint
-     * @param amounts Array of token amounts to mint
-     */
-    function batchMintWithERC20(
+    function _batchMintERC20Internal(
         address to,
         uint256[] memory tokenIds,
-        uint256[] memory amounts
-    ) external nonReentrant {
+        uint256[] memory amounts,
+        address referrer
+    ) internal {
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
 
         uint256 requiredPayment = 0;
         address erc20Address = address(0);
-
-        // Calculate required payment and validate drops
         for (uint256 i = 0; i < tokenIds.length; i++) {
             Drop memory drop = drops[tokenIds[i]];
             if (!drop.active) {
@@ -967,27 +1124,21 @@ contract BlueprintERC1155 is
             if (drop.acceptedERC20 == address(0)) {
                 revert BlueprintERC1155__InvalidERC20Address();
             }
-
-            // Ensure all drops use the same ERC20 token
             if (i == 0) {
                 erc20Address = drop.acceptedERC20;
             } else if (erc20Address != drop.acceptedERC20) {
-                revert BlueprintERC1155__InvalidERC20Address(); // Mixed ERC20 tokens not supported
+                revert BlueprintERC1155__InvalidERC20Address();
             }
-
             if (block.timestamp < drop.startTime) {
                 revert BlueprintERC1155__DropNotStarted();
             }
             if (block.timestamp > drop.endTime && drop.endTime != 0) {
                 revert BlueprintERC1155__DropEnded();
             }
-
             requiredPayment += drop.erc20Price * amounts[i];
         }
 
         IERC20 erc20Token = IERC20(erc20Address);
-
-        // Check user balance
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Balance(
@@ -995,8 +1146,6 @@ contract BlueprintERC1155 is
                 userBalance
             );
         }
-
-        // Check allowance
         uint256 allowance = erc20Token.allowance(msg.sender, address(this));
         if (allowance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Allowance(
@@ -1007,33 +1156,23 @@ contract BlueprintERC1155 is
 
         _mintBatch(to, tokenIds, amounts, "");
 
-        // Update total supplies
         uint256 totalAmount = 0;
         for (uint256 i = 0; i < tokenIds.length; i++) {
             _totalSupply[tokenIds[i]] += amounts[i];
             totalAmount += amounts[i];
         }
-
-        // Update global total supply
         _globalTotalSupply += totalAmount;
 
-        // Process ERC20 payments for each token
         for (uint256 i = 0; i < tokenIds.length; i++) {
             Drop memory drop = drops[tokenIds[i]];
             uint256 payment = drop.erc20Price * amounts[i];
-
-            // Get fee config for this token
             FeeConfig memory config = getFeeConfig(tokenIds[i]);
-
-            // Validate essential recipients
             if (config.blueprintRecipient == address(0)) {
                 revert BlueprintERC1155__ZeroBlueprintRecipient();
             }
             if (config.creatorRecipient == address(0)) {
                 revert BlueprintERC1155__ZeroCreatorRecipient();
             }
-
-            // Calculate fees
             uint256 platformFee = (payment * config.blueprintFeeBasisPoints) /
                 10000;
             uint256 creatorFee = (payment * config.creatorBasisPoints) / 10000;
@@ -1041,32 +1180,24 @@ contract BlueprintERC1155 is
                 10000;
             uint256 treasuryAmount = payment - platformFee - creatorFee;
 
-            // Transfer platform fee
             erc20Token.safeTransferFrom(
                 msg.sender,
                 config.blueprintRecipient,
                 platformFee
             );
-
-            // Transfer creator fee
             erc20Token.safeTransferFrom(
                 msg.sender,
                 config.creatorRecipient,
                 creatorFee
             );
-
-            // Transfer reward pool fee if recipient is set, otherwise it goes to treasury
             if (rewardPoolFee > 0 && config.rewardPoolRecipient != address(0)) {
                 erc20Token.safeTransferFrom(
                     msg.sender,
                     config.rewardPoolRecipient,
                     rewardPoolFee
                 );
-                // Subtract reward pool fee from treasury amount since it was sent
                 treasuryAmount -= rewardPoolFee;
             }
-
-            // Transfer treasury amount
             if (treasuryAmount > 0 && config.treasury != address(0)) {
                 erc20Token.safeTransferFrom(
                     msg.sender,
@@ -1085,23 +1216,27 @@ contract BlueprintERC1155 is
             requiredPayment,
             block.timestamp
         );
+        if (referrer != address(0)) {
+            emit ReferredBatchMint(
+                msg.sender,
+                referrer,
+                to,
+                tokenIds,
+                amounts,
+                erc20Address,
+                requiredPayment,
+                block.timestamp
+            );
+        }
     }
 
-    /**
-     * @dev EIP-5792 compatible batch-friendly ERC20 mint function with enhanced safeguards
-     * Designed to work optimally with batch transactions that include approval + mint
-     * Protects against fee-on-transfer tokens and other weird ERC20 behaviors
-     * @param to Recipient address
-     * @param tokenId Token ID to mint
-     * @param amount Number of tokens to mint
-     * @param allowFeeOnTransfer Whether to allow fee-on-transfer tokens (if false, reverts on any fee)
-     */
-    function mintWithERC20BatchSafe(
+    function _mintERC20BatchSafeInternal(
         address to,
         uint256 tokenId,
         uint256 amount,
-        bool allowFeeOnTransfer
-    ) external nonReentrant {
+        bool allowFeeOnTransfer,
+        address referrer
+    ) internal {
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -1122,7 +1257,6 @@ contract BlueprintERC1155 is
         uint256 requiredPayment = drop.erc20Price * amount;
         IERC20 erc20Token = IERC20(drop.acceptedERC20);
 
-        // Enhanced checks for weird ERC20 behaviors
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Balance(
@@ -1130,7 +1264,6 @@ contract BlueprintERC1155 is
                 userBalance
             );
         }
-
         uint256 allowance = erc20Token.allowance(msg.sender, address(this));
         if (allowance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Allowance(
@@ -1141,16 +1274,10 @@ contract BlueprintERC1155 is
 
         _mint(to, tokenId, amount, "");
 
-        // Update total supply for the token ID
         _totalSupply[tokenId] += amount;
-
-        // Update global total supply
         _globalTotalSupply += amount;
 
-        // Get the appropriate fee config for this token
         FeeConfig memory feeConfig = getFeeConfig(tokenId);
-
-        // Validate essential recipients
         if (feeConfig.blueprintRecipient == address(0)) {
             revert BlueprintERC1155__ZeroBlueprintRecipient();
         }
@@ -1158,7 +1285,6 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        // Handle ERC20 fee distribution with fee-on-transfer protection
         uint256 totalPrice = drop.erc20Price * amount;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
@@ -1168,9 +1294,7 @@ contract BlueprintERC1155 is
             10000;
         uint256 treasuryAmount = totalPrice - platformFee - creatorFee;
 
-        // Enhanced transfers with fee-on-transfer detection
         if (allowFeeOnTransfer) {
-            // Allow fee-on-transfer tokens - use regular SafeERC20
             erc20Token.safeTransferFrom(
                 msg.sender,
                 feeConfig.blueprintRecipient,
@@ -1181,7 +1305,6 @@ contract BlueprintERC1155 is
                 feeConfig.creatorRecipient,
                 creatorFee
             );
-
             if (
                 rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)
             ) {
@@ -1192,7 +1315,6 @@ contract BlueprintERC1155 is
                 );
                 treasuryAmount -= rewardPoolFee;
             }
-
             if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
                 erc20Token.safeTransferFrom(
                     msg.sender,
@@ -1201,7 +1323,6 @@ contract BlueprintERC1155 is
                 );
             }
         } else {
-            // Strict mode - verify exact amounts transferred (rejects fee-on-transfer tokens)
             _safeTransferWithVerification(
                 erc20Token,
                 msg.sender,
@@ -1214,7 +1335,6 @@ contract BlueprintERC1155 is
                 feeConfig.creatorRecipient,
                 creatorFee
             );
-
             if (
                 rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)
             ) {
@@ -1226,7 +1346,6 @@ contract BlueprintERC1155 is
                 );
                 treasuryAmount -= rewardPoolFee;
             }
-
             if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
                 _safeTransferWithVerification(
                     erc20Token,
@@ -1246,6 +1365,18 @@ contract BlueprintERC1155 is
             totalPrice,
             block.timestamp
         );
+        if (referrer != address(0)) {
+            emit ReferredMint(
+                msg.sender,
+                referrer,
+                to,
+                tokenId,
+                amount,
+                drop.acceptedERC20,
+                totalPrice,
+                block.timestamp
+            );
+        }
     }
 
     /**
