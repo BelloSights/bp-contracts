@@ -413,10 +413,10 @@ contract RewardPool is
             data.tokenAddress,
             rewardAmount, // grossAmount
             rewardAmount, // netAmount (no protocol fee in XP pool)
-            0, // protocolFee
+            0, // protocolFee (always 0 for XP-based pool)
             data.tokenType,
-            s_userXP[data.user], // userShares
-            s_totalXP // totalShares
+            s_userXP[data.user], // userAllocation (XP for this pool type)
+            s_totalXP // totalAllocations (total XP for this pool type)
         );
     }
 
@@ -486,10 +486,10 @@ contract RewardPool is
             data.tokenAddress,
             rewardAmount, // grossAmount
             rewardAmount, // netAmount (no protocol fee in XP pool)
-            0, // protocolFee
+            0, // protocolFee (always 0 for XP-based pool)
             data.tokenType,
-            s_userXP[data.user],
-            s_totalXP
+            s_userXP[data.user], // userAllocation (XP for this pool type)
+            s_totalXP // totalAllocations (total XP for this pool type)
         );
     }
 

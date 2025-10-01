@@ -133,8 +133,8 @@ interface IRewardPool {
         uint256 netAmount,
         uint256 protocolFee,
         TokenType tokenType,
-        uint256 userShares,
-        uint256 totalShares
+        uint256 userAllocation,
+        uint256 totalAllocations
     );
 
     // ===== BATCH EVENTS =====

@@ -21,7 +21,7 @@ import {
   WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { blueprintERC1155FactoryAbi, rewardPoolFactoryAbi } from "../abis";
+import { blueprintERC1155FactoryAbi, creatorRewardPoolFactoryAbi, rewardPoolFactoryAbi } from "../abis";
 
 dotenv.config({
   path: path.resolve(__dirname, "../../.env"),
@@ -242,19 +242,22 @@ export const getContractAddresses = (chainId: number) => {
   }
 
   if (!dropFactoryProxyAddress) {
-    throw new Error(
-      `ERC1155_FACTORY_PROXY_ADDRESS for chain ID ${chainId} is not set`
-    );
+    const varName = chainId === 8453 ? 'BASE_ERC1155_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_ERC1155_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_ERC1155_FACTORY_PROXY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
   }
   if (!rewardPoolFactoryAddress) {
-    throw new Error(
-      `REWARD_POOL_FACTORY_ADDRESS for chain ID ${chainId} is not set`
-    );
+    const varName = chainId === 8453 ? 'BASE_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_REWARD_POOL_FACTORY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
   }
   if (!creatorRewardPoolFactoryAddress) {
-    throw new Error(
-      `CREATOR_REWARD_POOL_FACTORY_ADDRESS for chain ID ${chainId} is not set`
-    );
+    const varName = chainId === 8453 ? 'BASE_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_CREATOR_REWARD_POOL_FACTORY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
   }
 
   return {
@@ -283,7 +286,7 @@ export const getContractsForChain = (chainId: number) => {
     },
     creatorRewardPoolFactoryContract: {
       address: creatorRewardPoolFactoryAddress,
-      abi: rewardPoolFactoryAbi,
+      abi: creatorRewardPoolFactoryAbi,
       chain,
     },
   };
