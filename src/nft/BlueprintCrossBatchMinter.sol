@@ -22,6 +22,32 @@ import "./BlueprintERC1155.sol";
  * @title BlueprintCrossBatchMinter
  * @dev Enables batch minting across multiple BlueprintERC1155 collections in a single transaction.
  * Perfect for shopping cart experiences where users want to mint from multiple collections at once.
+ *
+ * @notice This contract provides TWO main minting functions:
+ *
+ * 1. batchMintAcrossCollections (ETH only)
+ *    - Use when all items accept ETH payments
+ *    - Simpler and more gas-efficient
+ *    - Example: User wants to mint 3 NFTs from different collections, all priced in ETH
+ *
+ * 2. batchMintAcrossCollectionsMixed (Mixed payments - MOST FLEXIBLE)
+ *    - Use for ANY payment scenario:
+ *      • Pure ETH payments
+ *      • Single ERC20 token (e.g., all collections accept USDC)
+ *      • Multiple different ERC20 tokens (e.g., some accept USDC, others accept DAI)
+ *      • Mix of ETH and ERC20 payments
+ *    - Example: User wants to mint from 5 collections where:
+ *      • Collections A & B accept ETH
+ *      • Collection C accepts USDC
+ *      • Collections D & E accept DAI
+ *    - Requires users to approve each ERC20 token beforehand
+ *
+ * @notice PAYMENT METHOD SELECTION (for drops that accept BOTH ETH and ERC20):
+ *    - User sends ETH (msg.value > 0) → Contract uses ETH for dual-payment drops
+ *    - User sends NO ETH (msg.value == 0) → Contract uses ERC20 for dual-payment drops
+ *    This gives users explicit control over their payment method!
+ *
+ * @custom:security Users must approve ERC20 tokens to this contract before calling mixed payment functions
  * @custom:oz-upgrades-from BlueprintCrossBatchMinter
  */
 contract BlueprintCrossBatchMinter is
@@ -181,7 +207,9 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Batch mint across multiple collections using ETH payments
+     * @dev Batch mint across multiple collections using ETH payments only
+     * @notice Use this function when all items will be paid with ETH
+     * @notice For mixed payment methods (ETH + ERC20) or multiple ERC20 tokens, use batchMintAcrossCollectionsMixed
      * @param to Recipient address for all mints
      * @param items Array of mint items specifying collection, tokenId, and amount
      */
@@ -194,10 +222,7 @@ contract BlueprintCrossBatchMinter is
         }
 
         // Analyze payment requirements and validate all items
-        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(
-            items,
-            true
-        ); // ETH mode
+        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(items);
 
         if (msg.value < paymentInfo.totalETHRequired) {
             revert BlueprintCrossBatchMinter__InsufficientPayment(
@@ -208,12 +233,11 @@ contract BlueprintCrossBatchMinter is
 
         // Group items by collection for efficient batch processing
         CollectionMintData[] memory collectionData = _groupItemsByCollection(
-            items,
-            true
+            items
         );
 
         // Execute mints for each collection
-        _executeBatchMints(to, collectionData, true, address(0));
+        _executeBatchMints(to, collectionData);
 
         // Refund excess payment
         if (msg.value > paymentInfo.totalETHRequired) {
@@ -235,70 +259,32 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Batch mint across multiple collections using ERC20 payments
+     * @dev Batch mint across multiple collections using MIXED payment methods (ETH + multiple ERC20 tokens)
+     * @notice This is the MOST FLEXIBLE option - supports multiple payment methods in a single transaction:
+     *         - Pure ETH payments
+     *         - Pure ERC20 payments (single token like USDC)
+     *         - Multiple different ERC20 tokens (USDC + DAI + USDT)
+     *         - Mix of ETH and ERC20 payments
+     * @notice Perfect for shopping cart experiences where different creators accept different payment methods
+     * @notice Users must approve each ERC20 token separately before calling this function
+     *
+     * @notice PAYMENT METHOD SELECTION (for drops that accept both ETH and ERC20):
+     *         - Send ETH (msg.value > 0): Prefer ETH payment for dual-payment drops
+     *         - Send NO ETH (msg.value == 0): Prefer ERC20 payment for dual-payment drops
+     *         This gives users explicit control over which payment method to use!
+     *
      * @param to Recipient address for all mints
      * @param items Array of mint items specifying collection, tokenId, and amount
-     * @param erc20Token ERC20 token address for payment (must be consistent across all collections)
-     */
-    function batchMintAcrossCollectionsWithERC20(
-        address to,
-        BatchMintItem[] calldata items,
-        address erc20Token
-    ) external nonReentrant {
-        if (items.length == 0) {
-            revert BlueprintCrossBatchMinter__InvalidArrayLength();
-        }
-
-        // Analyze payment requirements and validate all items
-        PaymentInfo memory paymentInfo = _analyzePaymentRequirements(
-            items,
-            false
-        ); // ERC20 mode
-
-        IERC20 token = IERC20(erc20Token);
-
-        // Check user balance and allowance
-        uint256 userBalance = token.balanceOf(msg.sender);
-        if (userBalance < paymentInfo.totalERC20Required) {
-            revert BlueprintCrossBatchMinter__InsufficientERC20Balance(
-                paymentInfo.totalERC20Required,
-                userBalance
-            );
-        }
-
-        uint256 allowance = token.allowance(msg.sender, address(this));
-        if (allowance < paymentInfo.totalERC20Required) {
-            revert BlueprintCrossBatchMinter__InsufficientERC20Allowance(
-                paymentInfo.totalERC20Required,
-                allowance
-            );
-        }
-
-        // Group items by collection for efficient batch processing
-        CollectionMintData[] memory collectionData = _groupItemsByCollection(
-            items,
-            false
-        );
-
-        // Execute mints for each collection
-        _executeBatchMints(to, collectionData, false, erc20Token);
-
-        emit CrossCollectionBatchMint(
-            msg.sender,
-            to,
-            collectionData.length,
-            items.length,
-            erc20Token,
-            paymentInfo.totalERC20Required
-        );
-    }
-
-    /**
-     * @dev Batch mint across multiple collections using MIXED payment methods (ETH + ERC20)
-     * This enables true shopping cart experience where different drops can use different payment methods
-     * @param to Recipient address for all mints
-     * @param items Array of mint items specifying collection, tokenId, and amount
-     * @param erc20Tokens Array of ERC20 token addresses that will be used (for approval checking)
+     * @param erc20Tokens Array of ERC20 token addresses that will be used (must include all tokens accepted by items)
+     *
+     * @custom:example Pay with USDC only (even if drops accept ETH):
+     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS])  // msg.value = 0
+     *
+     * @custom:example Pay with ETH (for drops that accept both ETH and USDC):
+     *   batchMintAcrossCollectionsMixed{value: ethAmount}(recipient, items, [USDC_ADDRESS])
+     *
+     * @custom:example Multiple ERC20 tokens (some items accept USDC, others accept DAI):
+     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS, DAI_ADDRESS])
      */
     function batchMintAcrossCollectionsMixed(
         address to,
@@ -309,10 +295,16 @@ contract BlueprintCrossBatchMinter is
             revert BlueprintCrossBatchMinter__InvalidArrayLength();
         }
 
+        // Determine user's payment preference based on msg.value
+        // If user sends ETH, they prefer ETH for dual-payment drops
+        // If user sends no ETH, they prefer ERC20 for dual-payment drops
+        bool preferETH = msg.value > 0;
+
         // Analyze payment requirements for mixed mode
         MixedPaymentInfo memory paymentInfo = _analyzeMixedPaymentRequirements(
             items,
-            erc20Tokens
+            erc20Tokens,
+            preferETH
         );
 
         // Validate ETH payment
@@ -349,7 +341,10 @@ contract BlueprintCrossBatchMinter is
 
         // Group items by collection and payment method
         MixedCollectionData[]
-            memory collectionData = _groupItemsByCollectionMixed(items);
+            memory collectionData = _groupItemsByCollectionMixed(
+                items,
+                preferETH
+            );
 
         // Execute mints for each collection with appropriate payment method
         _executeMixedBatchMints(to, collectionData, paymentInfo);
@@ -374,69 +369,40 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Get total payment required for a batch of items (useful for frontend estimation)
+     * @dev Get total ETH payment required for a batch of items (useful for frontend estimation)
+     * @notice For mixed payment estimates, use getMixedPaymentEstimate instead
+     * @notice This function will revert with specific errors if items are invalid (provides better error context than isValid flag)
      * @param items Array of mint items
-     * @param useETH Whether to calculate for ETH (true) or ERC20 (false)
-     * @return totalPayment Total payment required
-     * @return paymentToken Address of payment token (address(0) for ETH)
-     * @return isValid Whether all items are valid for minting
+     * @return totalPayment Total ETH payment required
+     * @return paymentToken Address of payment token (always address(0) for ETH)
      */
     function getPaymentEstimate(
-        BatchMintItem[] calldata items,
-        bool useETH
-    )
-        external
-        view
-        returns (uint256 totalPayment, address paymentToken, bool isValid)
-    {
+        BatchMintItem[] calldata items
+    ) external view returns (uint256 totalPayment, address paymentToken) {
         if (items.length == 0) {
-            return (0, address(0), false);
+            revert BlueprintCrossBatchMinter__InvalidArrayLength();
         }
 
-        try this._analyzePaymentRequirementsView(items, useETH) returns (
-            PaymentInfo memory info
-        ) {
-            isValid = !info.mixedPaymentMethods;
-            if (useETH) {
-                totalPayment = info.totalETHRequired;
-                paymentToken = address(0);
-                isValid = isValid && info.hasETHPayments;
-            } else {
-                totalPayment = info.totalERC20Required;
-                paymentToken = info.erc20Token;
-                isValid = isValid && info.hasERC20Payments;
-            }
-        } catch {
-            isValid = false;
+        PaymentInfo memory info = _analyzePaymentRequirements(items);
+
+        if (info.mixedPaymentMethods || !info.hasETHPayments) {
+            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
         }
+
+        totalPayment = info.totalETHRequired;
+        paymentToken = address(0);
     }
 
     /**
-     * @dev External view function for payment analysis (used by getPaymentEstimate)
-     */
-    function _analyzePaymentRequirementsView(
-        BatchMintItem[] calldata items,
-        bool useETH
-    ) external view returns (PaymentInfo memory) {
-        return _analyzePaymentRequirements(items, useETH);
-    }
-
-    /**
-     * @dev Analyzes payment requirements for a batch of items
+     * @dev Analyzes ETH payment requirements for a batch of items
      * @param items Array of mint items
-     * @param useETH Whether analyzing for ETH payments
      * @return PaymentInfo struct with payment analysis
      */
     function _analyzePaymentRequirements(
-        BatchMintItem[] calldata items,
-        bool useETH
+        BatchMintItem[] calldata items
     ) internal view returns (PaymentInfo memory) {
         PaymentInfo memory info;
-
-        // First pass: validate basic requirements and collect payment method information
-        bool hasETHOnlyDrops = false;
         bool hasERC20OnlyDrops = false;
-        bool hasMixedDrops = false;
 
         for (uint256 i = 0; i < items.length; i++) {
             BatchMintItem calldata item = items[i];
@@ -457,7 +423,7 @@ contract BlueprintCrossBatchMinter is
             // Get drop information
             (
                 uint256 ethPrice,
-                uint256 erc20Price,
+                ,
                 address acceptedERC20,
                 uint256 startTime,
                 uint256 endTime,
@@ -477,94 +443,37 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Categorize payment methods
+            // Check if drop only supports ERC20
             bool supportsETH = ethEnabled;
             bool supportsERC20 = erc20Enabled && acceptedERC20 != address(0);
 
-            if (supportsETH && supportsERC20) {
-                hasMixedDrops = true;
-            } else if (supportsETH && !supportsERC20) {
-                hasETHOnlyDrops = true;
-            } else if (!supportsETH && supportsERC20) {
+            if (!supportsETH && supportsERC20) {
                 hasERC20OnlyDrops = true;
             }
 
-            // Calculate payment amounts
-            if (useETH) {
-                info.totalETHRequired += ethPrice * item.amount;
-                info.hasETHPayments = true;
-            } else {
-                // Only process ERC20 requirements if the drop supports ERC20
-                if (supportsERC20) {
-                    // Ensure all ERC20 drops use the same token
-                    if (info.erc20Token == address(0)) {
-                        info.erc20Token = acceptedERC20;
-                    } else if (info.erc20Token != acceptedERC20) {
-                        info.mixedPaymentMethods = true;
-                    }
-
-                    info.totalERC20Required += erc20Price * item.amount;
-                    info.hasERC20Payments = true;
-                }
+            // Validate ETH is enabled
+            if (!ethEnabled) {
+                revert BlueprintCrossBatchMinter__ETHNotEnabled();
             }
+
+            // Calculate ETH payment
+            info.totalETHRequired += ethPrice * item.amount;
+            info.hasETHPayments = true;
         }
 
-        // Determine if there are mixed payment methods
-        if (useETH) {
-            // For ETH mode, mixed methods occur only if we have drops that only support ERC20
-            info.mixedPaymentMethods = hasERC20OnlyDrops;
-        } else {
-            // For ERC20 mode, mixed methods occur only if we have drops that only support ETH
-            info.mixedPaymentMethods = hasETHOnlyDrops;
-
-            // If we're in ERC20 mode but have no ERC20 payments, that's an error
-            if (!info.hasERC20Payments) {
-                revert BlueprintCrossBatchMinter__ERC20NotEnabled();
-            }
-        }
-
-        // Second pass: validate payment method compatibility if no mixed methods detected
-        if (!info.mixedPaymentMethods) {
-            for (uint256 i = 0; i < items.length; i++) {
-                BatchMintItem calldata item = items[i];
-                BlueprintERC1155 collection = BlueprintERC1155(item.collection);
-
-                (
-                    ,
-                    ,
-                    ,
-                    ,
-                    ,
-                    ,
-                    // skip other fields
-                    bool ethEnabled,
-                    bool erc20Enabled
-                ) = collection.drops(item.tokenId);
-
-                if (useETH) {
-                    if (!ethEnabled) {
-                        revert BlueprintCrossBatchMinter__ETHNotEnabled();
-                    }
-                } else {
-                    if (!erc20Enabled) {
-                        revert BlueprintCrossBatchMinter__ERC20NotEnabled();
-                    }
-                }
-            }
-        }
+        // For ETH mode, mixed methods occur if we have drops that only support ERC20
+        info.mixedPaymentMethods = hasERC20OnlyDrops;
 
         return info;
     }
 
     /**
-     * @dev Groups items by collection for efficient batch processing
+     * @dev Groups items by collection for efficient batch processing (ETH payments only)
      * @param items Array of mint items
-     * @param useETH Whether using ETH payments
      * @return Array of CollectionMintData for batch processing
      */
     function _groupItemsByCollection(
-        BatchMintItem[] calldata items,
-        bool useETH
+        BatchMintItem[] calldata items
     ) internal view returns (CollectionMintData[] memory) {
         // Count unique collections
         address[] memory uniqueCollections = new address[](items.length);
@@ -605,7 +514,6 @@ contract BlueprintCrossBatchMinter is
             uint256[] memory tokenIds = new uint256[](itemCount);
             uint256[] memory amounts = new uint256[](itemCount);
             uint256 ethPayment = 0;
-            uint256 erc20Payment = 0;
 
             // Fill arrays
             uint256 currentIndex = 0;
@@ -614,26 +522,15 @@ contract BlueprintCrossBatchMinter is
                     tokenIds[currentIndex] = items[j].tokenId;
                     amounts[currentIndex] = items[j].amount;
 
-                    // Calculate payment for this item
+                    // Calculate ETH payment for this item
                     BlueprintERC1155 collectionContract = BlueprintERC1155(
                         collection
                     );
-                    (
-                        uint256 ethPrice,
-                        uint256 erc20Price,
-                        ,
-                        ,
-                        ,
-                        ,
-                        ,
+                    (uint256 ethPrice, , , , , , , ) = collectionContract.drops(
+                        items[j].tokenId
+                    );
 
-                    ) = collectionContract.drops(items[j].tokenId);
-
-                    if (useETH) {
-                        ethPayment += ethPrice * items[j].amount;
-                    } else {
-                        erc20Payment += erc20Price * items[j].amount;
-                    }
+                    ethPayment += ethPrice * items[j].amount;
 
                     currentIndex++;
                 }
@@ -644,7 +541,7 @@ contract BlueprintCrossBatchMinter is
                 tokenIds: tokenIds,
                 amounts: amounts,
                 ethPayment: ethPayment,
-                erc20Payment: erc20Payment
+                erc20Payment: 0
             });
         }
 
@@ -652,85 +549,24 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Executes batch mints for grouped collection data
+     * @dev Executes batch mints for grouped collection data (ETH payments only)
      * @param to Recipient address
      * @param collectionData Array of collection mint data
-     * @param useETH Whether using ETH payments
-     * @param erc20Token ERC20 token address (ignored if useETH is true)
      */
     function _executeBatchMints(
         address to,
-        CollectionMintData[] memory collectionData,
-        bool useETH,
-        address erc20Token
+        CollectionMintData[] memory collectionData
     ) internal {
         for (uint256 i = 0; i < collectionData.length; i++) {
             CollectionMintData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
 
-            if (useETH) {
-                // Use batchMint with ETH payment
-                collection.batchMint{value: data.ethPayment}(
-                    to,
-                    data.tokenIds,
-                    data.amounts
-                );
-            } else {
-                // Transfer tokens from user to this contract for this collection
-                IERC20 token = IERC20(erc20Token);
-                token.safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    data.erc20Payment
-                );
-
-                // Approve the collection to spend tokens
-                token.forceApprove(data.collection, data.erc20Payment);
-
-                // Try batch ERC20 mint; if unavailable, fall back to per-item mints
-                try
-                    collection.batchMintWithERC20(
-                        to,
-                        data.tokenIds,
-                        data.amounts
-                    )
-                {
-                    // success
-                } catch {
-                    // Fallback: attempt per-item mintWithERC20
-                    bool perItemSucceeded = true;
-                    for (uint256 k = 0; k < data.tokenIds.length; k++) {
-                        // Attempt individual mints; if any fails, mark and break
-                        try
-                            collection.mintWithERC20(
-                                to,
-                                data.tokenIds[k],
-                                data.amounts[k]
-                            )
-                        {
-                            // ok
-                        } catch {
-                            perItemSucceeded = false;
-                            break;
-                        }
-                    }
-
-                    if (!perItemSucceeded) {
-                        // Reset approval before reverting for safety
-                        token.forceApprove(data.collection, 0);
-                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
-                            bytes4(
-                                keccak256(
-                                    "batchMintWithERC20(address,uint256[],uint256[])"
-                                )
-                            )
-                        );
-                    }
-                }
-
-                // Reset approval for security
-                token.forceApprove(data.collection, 0);
-            }
+            // Use batchMint with ETH payment
+            collection.batchMint{value: data.ethPayment}(
+                to,
+                data.tokenIds,
+                data.amounts
+            );
 
             // Emit events for each item processed
             for (uint256 j = 0; j < data.tokenIds.length; j++) {
@@ -745,59 +581,36 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Check if user can perform a cross-collection batch mint
+     * @dev Check if user can perform a cross-collection batch mint with ETH
+     * @notice For mixed payment eligibility checks, check balances/allowances for each token separately
+     * @notice This function will revert with specific errors if items are invalid
      * @param user User address to check
      * @param items Array of mint items
-     * @param useETH Whether checking for ETH payments
      * @return canMint Whether the user can perform the mint
-     * @return totalRequired Total payment required
-     * @return paymentToken Payment token address (address(0) for ETH)
+     * @return totalRequired Total ETH payment required
+     * @return paymentToken Payment token address (always address(0) for ETH)
      */
     function checkBatchMintEligibility(
         address user,
-        BatchMintItem[] calldata items,
-        bool useETH
+        BatchMintItem[] calldata items
     )
         external
         view
         returns (bool canMint, uint256 totalRequired, address paymentToken)
     {
         if (items.length == 0) {
-            return (false, 0, address(0));
+            revert BlueprintCrossBatchMinter__InvalidArrayLength();
         }
 
-        try this._analyzePaymentRequirementsView(items, useETH) returns (
-            PaymentInfo memory info
-        ) {
-            if (info.mixedPaymentMethods) {
-                return (false, 0, address(0));
-            }
+        PaymentInfo memory info = _analyzePaymentRequirements(items);
 
-            if (useETH) {
-                if (!info.hasETHPayments) {
-                    return (false, 0, address(0));
-                }
-                totalRequired = info.totalETHRequired;
-                paymentToken = address(0);
-                canMint = user.balance >= totalRequired;
-            } else {
-                if (!info.hasERC20Payments) {
-                    return (false, 0, address(0));
-                }
-                totalRequired = info.totalERC20Required;
-                paymentToken = info.erc20Token;
-
-                IERC20 token = IERC20(paymentToken);
-                uint256 userBalance = token.balanceOf(user);
-                uint256 allowance = token.allowance(user, address(this));
-
-                canMint =
-                    userBalance >= totalRequired &&
-                    allowance >= totalRequired;
-            }
-        } catch {
-            canMint = false;
+        if (info.mixedPaymentMethods || !info.hasETHPayments) {
+            revert BlueprintCrossBatchMinter__MixedPaymentMethods();
         }
+
+        totalRequired = info.totalETHRequired;
+        paymentToken = address(0);
+        canMint = user.balance >= totalRequired;
     }
 
     /**
@@ -815,11 +628,13 @@ contract BlueprintCrossBatchMinter is
      * @dev Analyzes payment requirements for mixed payment batch
      * @param items Array of mint items
      * @param erc20Tokens Array of ERC20 tokens that might be used
+     * @param preferETH If true, prefer ETH for drops that accept both; if false, prefer ERC20
      * @return MixedPaymentInfo with payment requirements
      */
     function _analyzeMixedPaymentRequirements(
         BatchMintItem[] calldata items,
-        address[] calldata erc20Tokens
+        address[] calldata erc20Tokens,
+        bool preferETH
     ) internal view returns (MixedPaymentInfo memory) {
         MixedPaymentInfo memory info;
         info.erc20Requirements = new ERC20Requirement[](erc20Tokens.length);
@@ -872,15 +687,30 @@ contract BlueprintCrossBatchMinter is
             }
 
             // Determine payment method for this drop
-            bool useETH = ethEnabled && ethPrice > 0;
-            bool useERC20 = erc20Enabled &&
+            bool canUseETH = ethEnabled && ethPrice > 0;
+            bool canUseERC20 = erc20Enabled &&
                 acceptedERC20 != address(0) &&
                 erc20Price > 0;
 
-            // Prefer ETH if both are available and ETH price exists
-            if (useETH && (!useERC20 || ethPrice > 0)) {
+            // Respect user's payment preference
+            bool shouldUseETH;
+            if (canUseETH && canUseERC20) {
+                // Both available - use user's preference
+                shouldUseETH = preferETH;
+            } else if (canUseETH) {
+                // Only ETH available
+                shouldUseETH = true;
+            } else if (canUseERC20) {
+                // Only ERC20 available
+                shouldUseETH = false;
+            } else {
+                // Neither available - invalid drop
+                revert BlueprintCrossBatchMinter__DropNotActive();
+            }
+
+            if (shouldUseETH) {
                 info.totalETHRequired += ethPrice * item.amount;
-            } else if (useERC20) {
+            } else {
                 // Find the ERC20 token in our requirements array
                 bool found = false;
                 for (uint256 j = 0; j < info.erc20Requirements.length; j++) {
@@ -895,8 +725,6 @@ contract BlueprintCrossBatchMinter is
                 if (!found) {
                     revert BlueprintCrossBatchMinter__InvalidERC20Address();
                 }
-            } else {
-                revert BlueprintCrossBatchMinter__DropNotActive();
             }
         }
 
@@ -906,10 +734,12 @@ contract BlueprintCrossBatchMinter is
     /**
      * @dev Groups items by collection for mixed payment processing
      * @param items Array of mint items
+     * @param preferETH If true, prefer ETH for drops that accept both; if false, prefer ERC20
      * @return Array of MixedCollectionData
      */
     function _groupItemsByCollectionMixed(
-        BatchMintItem[] calldata items
+        BatchMintItem[] calldata items,
+        bool preferETH
     ) internal view returns (MixedCollectionData[] memory) {
         // Count unique collections
         address[] memory uniqueCollections = new address[](items.length);
@@ -975,15 +805,28 @@ contract BlueprintCrossBatchMinter is
                         bool erc20Enabled
                     ) = collectionContract.drops(items[j].tokenId);
 
-                    // Determine payment method (prefer ETH if available)
-                    bool useETH = ethEnabled && ethPrice > 0;
-                    bool useERC20 = erc20Enabled &&
+                    // Determine payment method based on user preference
+                    bool canUseETH = ethEnabled && ethPrice > 0;
+                    bool canUseERC20 = erc20Enabled &&
                         acceptedERC20 != address(0) &&
                         erc20Price > 0;
 
-                    if (useETH && (!useERC20 || ethPrice > 0)) {
+                    // Respect user's payment preference
+                    bool shouldUseETH;
+                    if (canUseETH && canUseERC20) {
+                        // Both available - use user's preference
+                        shouldUseETH = preferETH;
+                    } else if (canUseETH) {
+                        // Only ETH available
+                        shouldUseETH = true;
+                    } else {
+                        // Only ERC20 available (or neither, but that's caught in validation)
+                        shouldUseETH = false;
+                    }
+
+                    if (shouldUseETH) {
                         ethPayment += ethPrice * items[j].amount;
-                    } else if (useERC20) {
+                    } else {
                         erc20Payment += erc20Price * items[j].amount;
                         erc20Token = acceptedERC20;
                     }
@@ -1095,44 +938,35 @@ contract BlueprintCrossBatchMinter is
 
     /**
      * @dev Get payment estimate for mixed batch minting
+     * @notice This function will revert with specific errors if items are invalid (provides better error context than isValid flag)
      * @param items Array of mint items
      * @param erc20Tokens Array of potential ERC20 tokens
+     * @param preferETH If true, prefer ETH for drops that accept both; if false, prefer ERC20
      * @return ethRequired Total ETH required
      * @return erc20Requirements Array of ERC20 requirements
-     * @return isValid Whether the batch is valid
      */
     function getMixedPaymentEstimate(
         BatchMintItem[] calldata items,
-        address[] calldata erc20Tokens
+        address[] calldata erc20Tokens,
+        bool preferETH
     )
         external
         view
         returns (
             uint256 ethRequired,
-            ERC20Requirement[] memory erc20Requirements,
-            bool isValid
+            ERC20Requirement[] memory erc20Requirements
         )
     {
         if (items.length == 0) {
-            return (0, new ERC20Requirement[](0), false);
+            revert BlueprintCrossBatchMinter__InvalidArrayLength();
         }
 
-        try
-            this._analyzeMixedPaymentRequirementsView(items, erc20Tokens)
-        returns (MixedPaymentInfo memory info) {
-            return (info.totalETHRequired, info.erc20Requirements, true);
-        } catch {
-            return (0, new ERC20Requirement[](0), false);
-        }
-    }
+        MixedPaymentInfo memory info = _analyzeMixedPaymentRequirements(
+            items,
+            erc20Tokens,
+            preferETH
+        );
 
-    /**
-     * @dev External view function for mixed payment analysis
-     */
-    function _analyzeMixedPaymentRequirementsView(
-        BatchMintItem[] calldata items,
-        address[] calldata erc20Tokens
-    ) external view returns (MixedPaymentInfo memory) {
-        return _analyzeMixedPaymentRequirements(items, erc20Tokens);
+        return (info.totalETHRequired, info.erc20Requirements);
     }
 }

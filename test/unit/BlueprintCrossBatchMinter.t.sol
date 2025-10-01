@@ -203,20 +203,18 @@ contract BlueprintCrossBatchMinterTest is Test {
         // Get payment estimate
         (
             uint256 totalPayment,
-            address paymentToken,
-            bool isValid
-        ) = crossBatchMinter.getPaymentEstimate(items, true);
+            address paymentToken
+        ) = crossBatchMinter.getPaymentEstimate(items);
 
         assertEq(totalPayment, expectedTotal);
         assertEq(paymentToken, address(0)); // ETH
-        assertTrue(isValid);
 
         // Check user eligibility
         (
             bool canMint,
             uint256 totalRequired,
             address requiredToken
-        ) = crossBatchMinter.checkBatchMintEligibility(user, items, true);
+        ) = crossBatchMinter.checkBatchMintEligibility(user, items);
 
         assertTrue(canMint);
         assertEq(totalRequired, expectedTotal);
@@ -258,39 +256,40 @@ contract BlueprintCrossBatchMinterTest is Test {
         vm.startPrank(admin);
 
         // Create drops with ERC20 support
+        // Create ERC20-only drops (ETH disabled to force ERC20 payment in mixed function)
         uint256 tokenId1_1 = factory.createNewDropWithERC20(
             collection1,
-            0.1 ether, // ETH price
+            0, // No ETH price
             100 * 10 ** 18, // ERC20 price
             address(mockERC20),
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            true, // ETH enabled
+            false, // ETH disabled
             true // ERC20 enabled
         );
 
         uint256 tokenId1_2 = factory.createNewDropWithERC20(
             collection1,
-            0.15 ether,
+            0, // No ETH price
             150 * 10 ** 18,
             address(mockERC20),
             block.timestamp,
             block.timestamp + 1 hours,
             true,
-            true,
+            false, // ETH disabled
             true
         );
 
         uint256 tokenId2_1 = factory.createNewDropWithERC20(
             collection2,
-            0.12 ether,
+            0, // No ETH price
             120 * 10 ** 18,
             address(mockERC20),
             block.timestamp,
             block.timestamp + 1 hours,
             true,
-            true,
+            false, // ETH disabled
             true
         );
 
@@ -327,23 +326,27 @@ contract BlueprintCrossBatchMinterTest is Test {
         vm.prank(user);
         mockERC20.approve(address(crossBatchMinter), expectedTotal);
 
-        // Get payment estimate for ERC20
+        // Get mixed payment estimate for ERC20 only
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
         (
-            uint256 totalPayment,
-            address paymentToken,
-            bool isValid
-        ) = crossBatchMinter.getPaymentEstimate(items, false);
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, false); // preferETH = false for ERC20 payment
 
-        assertEq(totalPayment, expectedTotal);
-        assertEq(paymentToken, address(mockERC20));
-        assertTrue(isValid);
+        assertEq(ethRequired, 0); // No ETH required
+        assertEq(erc20Requirements.length, 1);
+        assertEq(erc20Requirements[0].token, address(mockERC20));
+        assertEq(erc20Requirements[0].amount, expectedTotal);
 
-        // Perform the cross-collection batch mint with ERC20
+        // Perform the cross-collection batch mint with ERC20 using mixed function
         vm.prank(user);
-        crossBatchMinter.batchMintAcrossCollectionsWithERC20(
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
             user,
             items,
-            address(mockERC20)
+            erc20Tokens
         );
 
         // Verify balances
@@ -541,7 +544,9 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
     }
 
-    function test_ERC20_BatchMint_Fallbacks_To_PerItem_When_Batch_Reverts() public {
+    function test_ERC20_BatchMint_Fallbacks_To_PerItem_When_Batch_Reverts()
+        public
+    {
         // Set up a collection where per-item ERC20 mint will work but batch ERC20 is forced to revert.
         // We simulate this by creating ERC20-enabled drops and then using expectRevert on the batch call via a prank/call filter.
 
@@ -573,9 +578,18 @@ contract BlueprintCrossBatchMinterTest is Test {
 
         vm.stopPrank();
 
-        BlueprintCrossBatchMinter.BatchMintItem[] memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
-        items[0] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection1, tokenId: t1, amount: 1});
-        items[1] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection1, tokenId: t2, amount: 2});
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: t1,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: t2,
+            amount: 2
+        });
 
         uint256 total = (100 * 10 ** 18) + (200 * 10 ** 18 * 2);
 
@@ -591,11 +605,24 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 bal1_before = BlueprintERC1155(collection1).balanceOf(user, t1);
         uint256 bal2_before = BlueprintERC1155(collection1).balanceOf(user, t2);
 
-        vm.prank(user);
-        crossBatchMinter.batchMintAcrossCollectionsWithERC20(user, items, address(mockERC20));
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
 
-        assertEq(BlueprintERC1155(collection1).balanceOf(user, t1), bal1_before + 1);
-        assertEq(BlueprintERC1155(collection1).balanceOf(user, t2), bal2_before + 2);
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens
+        );
+
+        assertEq(
+            BlueprintERC1155(collection1).balanceOf(user, t1),
+            bal1_before + 1
+        );
+        assertEq(
+            BlueprintERC1155(collection1).balanceOf(user, t2),
+            bal2_before + 2
+        );
     }
 
     function test_MixedMode_Fallbacks_To_PerItem_When_Batch_Reverts() public {
@@ -621,16 +648,31 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         vm.stopPrank();
 
-        BlueprintCrossBatchMinter.BatchMintItem[] memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
-        items[0] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection1, tokenId: c1, amount: 2});
-        items[1] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection2, tokenId: e1, amount: 1});
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: c1,
+            amount: 2
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: e1,
+            amount: 1
+        });
 
         // Approve ERC20 and send ETH
         vm.prank(user);
         mockERC20.approve(address(crossBatchMinter), 200 * 10 ** 18);
 
-        uint256 balC1_before = BlueprintERC1155(collection1).balanceOf(user, c1);
-        uint256 balE1_before = BlueprintERC1155(collection2).balanceOf(user, e1);
+        uint256 balC1_before = BlueprintERC1155(collection1).balanceOf(
+            user,
+            c1
+        );
+        uint256 balE1_before = BlueprintERC1155(collection2).balanceOf(
+            user,
+            e1
+        );
 
         address[] memory erc20s = new address[](1);
         erc20s[0] = address(mockERC20);
@@ -642,8 +684,14 @@ contract BlueprintCrossBatchMinterTest is Test {
             erc20s
         );
 
-        assertEq(BlueprintERC1155(collection1).balanceOf(user, c1), balC1_before + 2);
-        assertEq(BlueprintERC1155(collection2).balanceOf(user, e1), balE1_before + 1);
+        assertEq(
+            BlueprintERC1155(collection1).balanceOf(user, c1),
+            balC1_before + 2
+        );
+        assertEq(
+            BlueprintERC1155(collection2).balanceOf(user, e1),
+            balE1_before + 1
+        );
     }
 
     function test_ERC20_Mode_Revert_When_ERC20_Not_Enabled() public {
@@ -658,14 +706,34 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         vm.stopPrank();
 
-        BlueprintCrossBatchMinter.BatchMintItem[] memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
-        items[0] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection1, tokenId: tid, amount: 1});
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tid,
+            amount: 1
+        });
 
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // Since the drop only accepts ETH and mixed function prefers ETH when available,
+        // it will try to use ETH but fail because no ETH was sent (msg.value = 0)
         vm.prank(user);
         vm.expectRevert(
-            BlueprintCrossBatchMinter.BlueprintCrossBatchMinter__ERC20NotEnabled.selector
+            abi.encodeWithSelector(
+                BlueprintCrossBatchMinter
+                    .BlueprintCrossBatchMinter__InsufficientPayment
+                    .selector,
+                0.1 ether,
+                0
+            )
         );
-        crossBatchMinter.batchMintAcrossCollectionsWithERC20(user, items, address(mockERC20));
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens
+        );
     }
 
     function test_Revert_FunctionNotSupported_When_No_PerItem_Either() public {
@@ -684,21 +752,33 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         vm.stopPrank();
 
-        BlueprintCrossBatchMinter.BatchMintItem[] memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
-        items[0] = BlueprintCrossBatchMinter.BatchMintItem({collection: collection1, tokenId: t, amount: 1});
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: t,
+            amount: 1
+        });
 
-        // Approve only mockERC20 (not the accepted mockERC20_2), causing per-item to fail allowance check
+        // Provide wrong ERC20 token in the array (mockERC20 instead of mockERC20_2)
+        // This will cause InvalidERC20Address error during payment analysis
         vm.prank(user);
         mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
 
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
         vm.prank(user);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                BlueprintCrossBatchMinter.BlueprintCrossBatchMinter__FunctionNotSupported.selector,
-                bytes4(keccak256("batchMintWithERC20(address,uint256[],uint256[])"))
-            )
+            BlueprintCrossBatchMinter
+                .BlueprintCrossBatchMinter__InvalidERC20Address
+                .selector
         );
-        crossBatchMinter.batchMintAcrossCollectionsWithERC20(user, items, address(mockERC20));
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens
+        );
     }
 
     function test_RevertWhen_InsufficientPayment() public {
@@ -821,22 +901,19 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
     }
 
-    function test_PaymentEstimateEdgeCases() public view {
-        // Test with empty array
+    function test_PaymentEstimateEdgeCases() public {
+        // Test with empty array - should revert
         BlueprintCrossBatchMinter.BatchMintItem[]
             memory emptyItems = new BlueprintCrossBatchMinter.BatchMintItem[](
                 0
             );
 
-        (
-            uint256 totalPayment,
-            address paymentToken,
-            bool isValid
-        ) = crossBatchMinter.getPaymentEstimate(emptyItems, true);
-
-        assertEq(totalPayment, 0);
-        assertEq(paymentToken, address(0));
-        assertFalse(isValid);
+        vm.expectRevert(
+            BlueprintCrossBatchMinter
+                .BlueprintCrossBatchMinter__InvalidArrayLength
+                .selector
+        );
+        crossBatchMinter.getPaymentEstimate(emptyItems);
     }
 
     function test_UpdateFactory() public {
@@ -856,5 +933,117 @@ contract BlueprintCrossBatchMinterTest is Test {
                 .selector
         );
         crossBatchMinter.setFactory(address(0));
+    }
+
+    function test_UserChoosesPaymentMethod_DualPaymentDrop() public {
+        // Create a drop that accepts BOTH ETH and ERC20
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0.1 ether, // ETH price
+            100 * 10 ** 18, // ERC20 price
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true, // active
+            true, // ETH enabled
+            true // ERC20 enabled
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // SCENARIO 1: User prefers ETH (sends msg.value > 0)
+        {
+            (
+                uint256 ethRequired,
+                BlueprintCrossBatchMinter.ERC20Requirement[]
+                    memory erc20Requirements
+            ) = crossBatchMinter.getMixedPaymentEstimate(
+                    items,
+                    erc20Tokens,
+                    true
+                ); // preferETH = true
+
+            assertEq(
+                ethRequired,
+                0.1 ether,
+                "Should require ETH when preferETH=true"
+            );
+            assertEq(
+                erc20Requirements[0].amount,
+                0,
+                "Should not require ERC20 when preferETH=true"
+            );
+
+            // Execute the mint with ETH
+            vm.prank(user);
+            crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+                user,
+                items,
+                erc20Tokens
+            );
+
+            assertEq(
+                BlueprintERC1155(collection1).balanceOf(user, tokenId),
+                1,
+                "Should have minted with ETH"
+            );
+        }
+
+        // SCENARIO 2: User prefers ERC20 (sends msg.value = 0)
+        {
+            (
+                uint256 ethRequired,
+                BlueprintCrossBatchMinter.ERC20Requirement[]
+                    memory erc20Requirements
+            ) = crossBatchMinter.getMixedPaymentEstimate(
+                    items,
+                    erc20Tokens,
+                    false
+                ); // preferETH = false
+
+            assertEq(
+                ethRequired,
+                0,
+                "Should not require ETH when preferETH=false"
+            );
+            assertEq(
+                erc20Requirements[0].amount,
+                100 * 10 ** 18,
+                "Should require ERC20 when preferETH=false"
+            );
+
+            // Approve and execute the mint with ERC20
+            vm.prank(user);
+            mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+            vm.prank(user);
+            crossBatchMinter.batchMintAcrossCollectionsMixed(
+                user,
+                items,
+                erc20Tokens
+            ); // NO msg.value sent
+
+            assertEq(
+                BlueprintERC1155(collection1).balanceOf(user, tokenId),
+                2,
+                "Should have minted with ERC20"
+            );
+            assertEq(
+                mockERC20.balanceOf(user),
+                999900 * 10 ** 18,
+                "User should have paid 100 ERC20 tokens (1M - 100)"
+            );
+        }
     }
 }
