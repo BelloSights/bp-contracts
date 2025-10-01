@@ -890,7 +890,7 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Try batch ERC20 mint with referrer
+                // Try batch ERC20 mint with referrer (new signature for v2+ collections)
                 try
                     collection.batchMintWithERC20(
                         to,
@@ -899,18 +899,28 @@ contract BlueprintCrossBatchMinter is
                         referrer
                     )
                 {
-                    // success
+                    // success with referrer
                 } catch {
-                    // If batch mint fails, revert immediately to avoid partial execution gas waste
-                    // Reset approval before reverting for safety
-                    token.forceApprove(data.collection, 0);
-                    revert BlueprintCrossBatchMinter__FunctionNotSupported(
-                        bytes4(
-                            keccak256(
-                                "batchMintWithERC20(address,uint256[],uint256[],address)"
-                            )
+                    // Fall back to old signature (v1 collections without referrer support)
+                    try
+                        collection.batchMintWithERC20(
+                            to,
+                            data.tokenIds,
+                            data.amounts
                         )
-                    );
+                    {
+                        // success without referrer
+                    } catch {
+                        // Both attempts failed - reset approval and revert
+                        token.forceApprove(data.collection, 0);
+                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
+                            bytes4(
+                                keccak256(
+                                    "batchMintWithERC20(address,uint256[],uint256[])"
+                                )
+                            )
+                        );
+                    }
                 }
 
                 // Reset approval for security
