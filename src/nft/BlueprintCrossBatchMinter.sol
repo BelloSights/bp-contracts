@@ -23,7 +23,7 @@ import "./BlueprintERC1155.sol";
  * @dev Enables batch minting across multiple BlueprintERC1155 collections in a single transaction.
  * Perfect for shopping cart experiences where users want to mint from multiple collections at once.
  *
- * @notice This contract provides TWO main minting functions:
+ * @notice This contract provides the following minting functions:
  *
  * 1. batchMintAcrossCollections (ETH only)
  *    - Use when all items accept ETH payments
