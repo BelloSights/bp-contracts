@@ -46,8 +46,8 @@ export class CreatorRewardPoolSDK {
     description: string;
     protocolFeeBps?: number; // 0-1000
   }) {
-    const chain =
-      getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain;
+    const chain = getContractsForChain(this.chainId)
+      .creatorRewardPoolFactoryContract.chain;
     let hash: `0x${string}`;
     if (protocolFeeBps === undefined) {
       hash = await this.walletClient.writeContract({
@@ -84,19 +84,72 @@ export class CreatorRewardPoolSDK {
   async addUser({
     creator,
     user,
+    tokenAddress,
+    tokenType,
     allocation,
   }: {
     creator: Address;
     user: Address;
+    tokenAddress: Address;
+    tokenType: CreatorTokenType;
     allocation: bigint;
   }) {
     const hash = await this.walletClient.writeContract({
       address: this.FACTORY_ADDRESS,
       abi: creatorRewardPoolFactoryAbi,
       functionName: "addUser",
-      args: [creator, user, allocation],
+      args: [creator, user, tokenAddress, tokenType, allocation],
       account: this.walletClient.account!,
-      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
+    });
+    return { tx: hash };
+  }
+
+  async updateUserAllocation({
+    creator,
+    user,
+    tokenAddress,
+    tokenType,
+    newAllocation,
+  }: {
+    creator: Address;
+    user: Address;
+    tokenAddress: Address;
+    tokenType: CreatorTokenType;
+    newAllocation: bigint;
+  }) {
+    const hash = await this.walletClient.writeContract({
+      address: this.FACTORY_ADDRESS,
+      abi: creatorRewardPoolFactoryAbi,
+      functionName: "updateUserAllocation",
+      args: [creator, user, tokenAddress, tokenType, newAllocation],
+      account: this.walletClient.account!,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
+    });
+    return { tx: hash };
+  }
+
+  async removeUser({
+    creator,
+    user,
+    tokenAddress,
+    tokenType,
+  }: {
+    creator: Address;
+    user: Address;
+    tokenAddress: Address;
+    tokenType: CreatorTokenType;
+  }) {
+    const hash = await this.walletClient.writeContract({
+      address: this.FACTORY_ADDRESS,
+      abi: creatorRewardPoolFactoryAbi,
+      functionName: "removeUser",
+      args: [creator, user, tokenAddress, tokenType],
+      account: this.walletClient.account!,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
     });
     return { tx: hash };
   }
@@ -108,7 +161,8 @@ export class CreatorRewardPoolSDK {
       functionName: "activateCreatorPool",
       args: [creator],
       account: this.walletClient.account!,
-      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
     });
     return { tx: hash };
   }
@@ -153,7 +207,8 @@ export class CreatorRewardPoolSDK {
       functionName: "claimReward",
       args: [claimData, signature],
       account: this.walletClient.account!,
-      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
     });
     return { tx: hash };
   }
@@ -173,7 +228,8 @@ export class CreatorRewardPoolSDK {
       functionName: "claimRewardFor",
       args: [claimData, signature],
       account: this.walletClient.account!,
-      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
     });
     return { tx: hash };
   }
@@ -193,7 +249,8 @@ export class CreatorRewardPoolSDK {
       functionName: "claimRewardFor",
       args: [creator, claimData, signature],
       account: this.walletClient.account!,
-      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract.chain,
+      chain: getContractsForChain(this.chainId).creatorRewardPoolFactoryContract
+        .chain,
     });
     return { tx: hash };
   }

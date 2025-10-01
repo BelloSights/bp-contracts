@@ -7,7 +7,7 @@ import {
   createWalletClient,
   http,
   parseGwei,
-  parseUnits
+  parseUnits,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
@@ -99,6 +99,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
     console.log("[CRP] Creator:", creator, "UserA:", userA, "UserB:", userB);
     // ERC20 setup: allocation = 10 USDC for each user
     const tenUSDC = parseUnits("10", 6);
+    const usdcToken = "0x8c049dBe9F1889deBeaCFAD05e55dF30cb87E97d" as Address;
 
     // Prepare a sequential nonce manager to avoid RPC race conditions
     let txNonce = await publicClient.getTransactionCount({
@@ -172,7 +173,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
         address: factoryProxy,
         abi: creatorRewardPoolFactoryAbi,
         functionName: "addUser",
-        args: [creator, userA, tenUSDC],
+        args: [creator, userA, usdcToken, CreatorTokenType.ERC20, tenUSDC],
         nonce: txNonce++,
         maxFeePerGas,
         maxPriorityFeePerGas,
@@ -188,7 +189,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
           address: factoryProxy,
           abi: creatorRewardPoolFactoryAbi,
           functionName: "updateUserAllocation",
-          args: [creator, userA, tenUSDC],
+          args: [creator, userA, usdcToken, CreatorTokenType.ERC20, tenUSDC],
           nonce: txNonce++,
           maxFeePerGas,
           maxPriorityFeePerGas,
@@ -208,7 +209,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
         address: factoryProxy,
         abi: creatorRewardPoolFactoryAbi,
         functionName: "addUser",
-        args: [creator, userB, tenUSDC],
+        args: [creator, userB, usdcToken, CreatorTokenType.ERC20, tenUSDC],
         nonce: txNonce++,
         maxFeePerGas,
         maxPriorityFeePerGas,
@@ -230,7 +231,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
           address: factoryProxy,
           abi: creatorRewardPoolFactoryAbi,
           functionName: "updateUserAllocation",
-          args: [creator, userB, tenUSDC],
+          args: [creator, userB, usdcToken, CreatorTokenType.ERC20, tenUSDC],
           // retry with fresh bumped fees and next nonce
           nonce: txNonce++,
           maxFeePerGas: (maxFeePerGasB * 13n) / 10n,
@@ -316,8 +317,12 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
       console.log(
         "[CRP] Step 4: ERC20 flow (10 USDC each for userA and userB)..."
       );
-      const token = "0x8c049dBe9F1889deBeaCFAD05e55dF30cb87E97d" as Address;
-      console.log("[CRP] ERC20 token:", token, "tenUSDC:", tenUSDC.toString());
+      console.log(
+        "[CRP] ERC20 token:",
+        usdcToken,
+        "tenUSDC:",
+        tenUSDC.toString()
+      );
 
       // Deactivate to update allocations for ERC20 scenario
       try {
@@ -347,7 +352,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
           address: factoryProxy,
           abi: creatorRewardPoolFactoryAbi,
           functionName: "updateUserAllocation",
-          args: [creator, userA, tenUSDC],
+          args: [creator, userA, usdcToken, CreatorTokenType.ERC20, tenUSDC],
           nonce: txNonce++,
           maxFeePerGas,
           maxPriorityFeePerGas,
@@ -361,7 +366,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
           address: factoryProxy,
           abi: creatorRewardPoolFactoryAbi,
           functionName: "updateUserAllocation",
-          args: [creator, userB, tenUSDC],
+          args: [creator, userB, usdcToken, CreatorTokenType.ERC20, tenUSDC],
           nonce: txNonce++,
           maxFeePerGas,
           maxPriorityFeePerGas,
@@ -374,7 +379,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
       {
         const { maxFeePerGas, maxPriorityFeePerGas } = await getFees();
         const transferHash = await walletClient.writeContract({
-          address: token,
+          address: usdcToken,
           abi: [
             {
               inputs: [
@@ -415,11 +420,14 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
 
       // Claim 10 USDC for userA (direct pool entrypoint)
       const adminNonceErc20 = await getNextNonce(userA);
-      console.log("[CRP] ERC20 claim nonce for userA:", adminNonceErc20.toString());
+      console.log(
+        "[CRP] ERC20 claim nonce for userA:",
+        adminNonceErc20.toString()
+      );
       const userAClaim = {
         user: userA,
         nonce: adminNonceErc20,
-        tokenAddress: token,
+        tokenAddress: usdcToken,
         tokenType: CreatorTokenType.ERC20,
       };
       const userASig = await signClaim(userAClaim);
@@ -443,7 +451,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
       const userBClaim20 = {
         user: userB,
         nonce: userBNonce2,
-        tokenAddress: token,
+        tokenAddress: usdcToken,
         tokenType: CreatorTokenType.ERC20,
       };
       const userBsig2 = await signClaim(userBClaim20);
@@ -461,10 +469,7 @@ describe("CreatorRewardPool SDK (Base Sepolia)", () => {
         console.log("[CRP] Factory claim confirmed (erc20)");
       }
     } catch (e) {
-      console.log(
-        "ERC20 flow skipped:",
-        (e as any)?.message || e
-      );
+      console.log("ERC20 flow skipped:", (e as any)?.message || e);
     }
 
     expect(poolAddress).toBeTruthy();

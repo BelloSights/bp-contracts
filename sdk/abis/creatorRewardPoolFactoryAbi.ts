@@ -74,6 +74,12 @@ export const creatorRewardPoolFactoryAbi = [
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
       { name: "user", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
       { name: "allocation", type: "uint256", internalType: "uint256" },
     ],
     outputs: [],
@@ -85,6 +91,12 @@ export const creatorRewardPoolFactoryAbi = [
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
       { name: "user", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
       { name: "newAllocation", type: "uint256", internalType: "uint256" },
     ],
     outputs: [],
@@ -96,6 +108,12 @@ export const creatorRewardPoolFactoryAbi = [
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
       { name: "user", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -105,6 +123,12 @@ export const creatorRewardPoolFactoryAbi = [
     name: "batchAddUsers",
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
       { name: "users", type: "address[]", internalType: "address[]" },
       { name: "allocations", type: "uint256[]", internalType: "uint256[]" },
     ],
@@ -116,6 +140,12 @@ export const creatorRewardPoolFactoryAbi = [
     name: "batchUpdateUserAllocations",
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
       { name: "users", type: "address[]", internalType: "address[]" },
       { name: "newAllocations", type: "uint256[]", internalType: "uint256[]" },
     ],
@@ -127,6 +157,12 @@ export const creatorRewardPoolFactoryAbi = [
     name: "batchRemoveUsers",
     inputs: [
       { name: "creator", type: "address", internalType: "address" },
+      { name: "tokenAddress", type: "address", internalType: "address" },
+      {
+        name: "tokenType",
+        type: "uint8",
+        internalType: "enum ICreatorRewardPool.TokenType",
+      },
       { name: "users", type: "address[]", internalType: "address[]" },
     ],
     outputs: [],
@@ -252,6 +288,81 @@ export const creatorRewardPoolFactoryAbi = [
       { name: "availableBalance", type: "uint256", internalType: "uint256" },
     ],
     stateMutability: "view",
+  },
+  {
+    type: "event",
+    name: "CreatorPoolCreated",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+      { name: "pool", type: "address", indexed: true, internalType: "address" },
+      { name: "name", type: "string", indexed: false, internalType: "string" },
+      { name: "description", type: "string", indexed: false, internalType: "string" },
+      { name: "protocolFeeRate", type: "uint256", indexed: false, internalType: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "CreatorPoolActivated",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+    ],
+  },
+  {
+    type: "event",
+    name: "CreatorPoolDeactivated",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+    ],
+  },
+  {
+    type: "event",
+    name: "UserAdded",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+      { name: "user", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenAddress", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenType", type: "uint8", indexed: false, internalType: "enum ICreatorRewardPool.TokenType" },
+      { name: "allocation", type: "uint256", indexed: false, internalType: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "AllocationUpdated",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+      { name: "user", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenAddress", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenType", type: "uint8", indexed: false, internalType: "enum ICreatorRewardPool.TokenType" },
+      { name: "oldAllocation", type: "uint256", indexed: false, internalType: "uint256" },
+      { name: "newAllocation", type: "uint256", indexed: false, internalType: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "UserRemoved",
+    inputs: [
+      { name: "creator", type: "address", indexed: true, internalType: "address" },
+      { name: "user", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenAddress", type: "address", indexed: true, internalType: "address" },
+      { name: "tokenType", type: "uint8", indexed: false, internalType: "enum ICreatorRewardPool.TokenType" },
+      { name: "allocation", type: "uint256", indexed: false, internalType: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "ProtocolFeeRecipientUpdated",
+    inputs: [
+      { name: "oldRecipient", type: "address", indexed: true, internalType: "address" },
+      { name: "newRecipient", type: "address", indexed: true, internalType: "address" },
+    ],
+  },
+  {
+    type: "event",
+    name: "DefaultProtocolFeeRateUpdated",
+    inputs: [
+      { name: "oldRate", type: "uint256", indexed: false, internalType: "uint256" },
+      { name: "newRate", type: "uint256", indexed: false, internalType: "uint256" },
+    ],
   },
   {
     type: "error",
