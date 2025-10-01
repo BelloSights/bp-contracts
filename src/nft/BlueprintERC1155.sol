@@ -779,10 +779,16 @@ contract BlueprintERC1155 is
 
         _mint(to, tokenId, amount, "");
 
+        // Update total supply for the token ID
         _totalSupply[tokenId] += amount;
+
+        // Update global total supply
         _globalTotalSupply += amount;
 
+        // Get the appropriate fee config for this token
         FeeConfig memory feeConfig = getFeeConfig(tokenId);
+
+        // Validate essential recipients
         if (feeConfig.blueprintRecipient == address(0)) {
             revert BlueprintERC1155__ZeroBlueprintRecipient();
         }
@@ -790,6 +796,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
+        // Handle fee distribution
         uint256 totalPrice = drop.price * amount;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
@@ -799,6 +806,7 @@ contract BlueprintERC1155 is
             10000;
         uint256 treasuryAmount = totalPrice - platformFee - creatorFee;
 
+        // Send platform fee
         (bool feeSuccess, ) = feeConfig.blueprintRecipient.call{
             value: platformFee
         }("");
@@ -806,6 +814,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__BlueprintFeeTransferFailed();
         }
 
+        // Send creator fee
         (bool creatorSuccess, ) = feeConfig.creatorRecipient.call{
             value: creatorFee
         }("");
@@ -813,6 +822,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__CreatorFeeTransferFailed();
         }
 
+        // Send reward pool fee if recipient is set, otherwise it goes to treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             (bool rewardPoolSuccess, ) = feeConfig.rewardPoolRecipient.call{
                 value: rewardPoolFee
@@ -823,6 +833,7 @@ contract BlueprintERC1155 is
             treasuryAmount -= rewardPoolFee;
         }
 
+        // Send treasury amount if set
         if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
             (bool treasurySuccess, ) = feeConfig.treasury.call{
                 value: treasuryAmount
@@ -832,6 +843,7 @@ contract BlueprintERC1155 is
             }
         }
 
+        // Refund excess payment if any
         if (msg.value > totalPrice) {
             uint256 refund = msg.value - totalPrice;
             (bool refundSuccess, ) = msg.sender.call{value: refund}("");
@@ -889,6 +901,7 @@ contract BlueprintERC1155 is
         uint256 requiredPayment = drop.erc20Price * amount;
         IERC20 erc20Token = IERC20(drop.acceptedERC20);
 
+        // Check user balance
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Balance(
@@ -897,6 +910,7 @@ contract BlueprintERC1155 is
             );
         }
 
+        // Check allowance
         uint256 allowance = erc20Token.allowance(msg.sender, address(this));
         if (allowance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Allowance(
@@ -907,9 +921,13 @@ contract BlueprintERC1155 is
 
         _mint(to, tokenId, amount, "");
 
+        // Update total supply for the token ID
         _totalSupply[tokenId] += amount;
+
+        // Update global total supply
         _globalTotalSupply += amount;
 
+        // Handle ERC20 fee distribution
         FeeConfig memory feeConfig = getFeeConfig(tokenId);
         if (feeConfig.blueprintRecipient == address(0)) {
             revert BlueprintERC1155__ZeroBlueprintRecipient();
@@ -927,17 +945,21 @@ contract BlueprintERC1155 is
             10000;
         uint256 treasuryAmount = totalPrice - platformFee - creatorFee;
 
+        // Send platform fee
         erc20Token.safeTransferFrom(
             msg.sender,
             feeConfig.blueprintRecipient,
             platformFee
         );
+
+        // Send creator fee
         erc20Token.safeTransferFrom(
             msg.sender,
             feeConfig.creatorRecipient,
             creatorFee
         );
 
+        // Send reward pool fee if recipient is set, otherwise it goes to treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             erc20Token.safeTransferFrom(
                 msg.sender,
@@ -947,6 +969,7 @@ contract BlueprintERC1155 is
             treasuryAmount -= rewardPoolFee;
         }
 
+        // Send treasury amount if set
         if (treasuryAmount > 0 && feeConfig.treasury != address(0)) {
             erc20Token.safeTransferFrom(
                 msg.sender,

@@ -57,6 +57,7 @@ contract BlueprintCrossBatchMinter is
     error BlueprintCrossBatchMinter__ETHNotEnabled();
     error BlueprintCrossBatchMinter__ERC20NotEnabled();
     error BlueprintCrossBatchMinter__InvalidERC20Address();
+    error BlueprintCrossBatchMinter__FunctionNotSupported(bytes4 selector);
 
     // ===== ROLES =====
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
@@ -493,17 +494,18 @@ contract BlueprintCrossBatchMinter is
                 info.totalETHRequired += ethPrice * item.amount;
                 info.hasETHPayments = true;
             } else {
-                // Ensure all ERC20 drops use the same token
+                // Only process ERC20 requirements if the drop supports ERC20
                 if (supportsERC20) {
+                    // Ensure all ERC20 drops use the same token
                     if (info.erc20Token == address(0)) {
                         info.erc20Token = acceptedERC20;
                     } else if (info.erc20Token != acceptedERC20) {
                         info.mixedPaymentMethods = true;
                     }
-                }
 
-                info.totalERC20Required += erc20Price * item.amount;
-                info.hasERC20Payments = true;
+                    info.totalERC20Required += erc20Price * item.amount;
+                    info.hasERC20Payments = true;
+                }
             }
         }
 
@@ -514,6 +516,11 @@ contract BlueprintCrossBatchMinter is
         } else {
             // For ERC20 mode, mixed methods occur only if we have drops that only support ETH
             info.mixedPaymentMethods = hasETHOnlyDrops;
+
+            // If we're in ERC20 mode but have no ERC20 payments, that's an error
+            if (!info.hasERC20Payments) {
+                revert BlueprintCrossBatchMinter__ERC20NotEnabled();
+            }
         }
 
         // Second pass: validate payment method compatibility if no mixed methods detected
@@ -680,8 +687,46 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Use batchMintWithERC20
-                collection.batchMintWithERC20(to, data.tokenIds, data.amounts);
+                // Try batch ERC20 mint; if unavailable, fall back to per-item mints
+                try
+                    collection.batchMintWithERC20(
+                        to,
+                        data.tokenIds,
+                        data.amounts
+                    )
+                {
+                    // success
+                } catch {
+                    // Fallback: attempt per-item mintWithERC20
+                    bool perItemSucceeded = true;
+                    for (uint256 k = 0; k < data.tokenIds.length; k++) {
+                        // Attempt individual mints; if any fails, mark and break
+                        try
+                            collection.mintWithERC20(
+                                to,
+                                data.tokenIds[k],
+                                data.amounts[k]
+                            )
+                        {
+                            // ok
+                        } catch {
+                            perItemSucceeded = false;
+                            break;
+                        }
+                    }
+
+                    if (!perItemSucceeded) {
+                        // Reset approval before reverting for safety
+                        token.forceApprove(data.collection, 0);
+                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
+                            bytes4(
+                                keccak256(
+                                    "batchMintWithERC20(address,uint256[],uint256[])"
+                                )
+                            )
+                        );
+                    }
+                }
 
                 // Reset approval for security
                 token.forceApprove(data.collection, 0);
@@ -993,8 +1038,44 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Use batchMintWithERC20
-                collection.batchMintWithERC20(to, data.tokenIds, data.amounts);
+                // Try batch ERC20 mint; if unavailable, fall back to per-item mints
+                try
+                    collection.batchMintWithERC20(
+                        to,
+                        data.tokenIds,
+                        data.amounts
+                    )
+                {
+                    // success
+                } catch {
+                    bool perItemSucceeded = true;
+                    for (uint256 k = 0; k < data.tokenIds.length; k++) {
+                        try
+                            collection.mintWithERC20(
+                                to,
+                                data.tokenIds[k],
+                                data.amounts[k]
+                            )
+                        {
+                            // ok
+                        } catch {
+                            perItemSucceeded = false;
+                            break;
+                        }
+                    }
+
+                    if (!perItemSucceeded) {
+                        // Reset approval before reverting for safety
+                        token.forceApprove(data.collection, 0);
+                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
+                            bytes4(
+                                keccak256(
+                                    "batchMintWithERC20(address,uint256[],uint256[])"
+                                )
+                            )
+                        );
+                    }
+                }
 
                 // Reset approval for security
                 token.forceApprove(data.collection, 0);
