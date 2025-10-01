@@ -201,10 +201,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         // = 0.2 + 0.3 + 0.4 + 0.24 + 0.36 = 1.5 ether
 
         // Get payment estimate
-        (
-            uint256 totalPayment,
-            address paymentToken
-        ) = crossBatchMinter.getPaymentEstimate(items);
+        (uint256 totalPayment, address paymentToken) = crossBatchMinter
+            .getPaymentEstimate(items);
 
         assertEq(totalPayment, expectedTotal);
         assertEq(paymentToken, address(0)); // ETH
@@ -234,7 +232,8 @@ contract BlueprintCrossBatchMinterTest is Test {
 
         crossBatchMinter.batchMintAcrossCollections{value: expectedTotal}(
             user,
-            items
+            items,
+            address(0)
         );
 
         // Verify balances
@@ -346,7 +345,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
 
         // Verify balances
@@ -376,7 +376,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         crossBatchMinter.batchMintAcrossCollections{value: 1 ether}(
             user,
-            items
+            items,
+            address(0)
         );
     }
 
@@ -437,7 +438,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
 
         // Verify balances
@@ -523,7 +525,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0}(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
 
         // Verify all NFTs were minted
@@ -612,7 +615,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
 
         assertEq(
@@ -681,7 +685,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.05 ether}(
             user,
             items,
-            erc20s
+            erc20s,
+            address(0)
         );
 
         assertEq(
@@ -732,7 +737,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
     }
 
@@ -777,7 +783,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         crossBatchMinter.batchMintAcrossCollectionsMixed(
             user,
             items,
-            erc20Tokens
+            erc20Tokens,
+            address(0)
         );
     }
 
@@ -815,7 +822,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         crossBatchMinter.batchMintAcrossCollections{value: 0.5 ether}(
             user,
-            items
+            items,
+            address(0)
         );
     }
 
@@ -847,7 +855,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         vm.prank(user);
         crossBatchMinter.batchMintAcrossCollections{value: excessPayment}(
             user,
-            items
+            items,
+            address(0)
         );
 
         uint256 userBalanceAfter = user.balance;
@@ -864,7 +873,7 @@ contract BlueprintCrossBatchMinterTest is Test {
                 .BlueprintCrossBatchMinter__InvalidArrayLength
                 .selector
         );
-        crossBatchMinter.batchMintAcrossCollections(user, items);
+        crossBatchMinter.batchMintAcrossCollections(user, items, address(0));
     }
 
     function test_ZeroAmount() public {
@@ -897,7 +906,8 @@ contract BlueprintCrossBatchMinterTest is Test {
         );
         crossBatchMinter.batchMintAcrossCollections{value: 1 ether}(
             user,
-            items
+            items,
+            address(0)
         );
     }
 
@@ -990,7 +1000,8 @@ contract BlueprintCrossBatchMinterTest is Test {
             crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
                 user,
                 items,
-                erc20Tokens
+                erc20Tokens,
+                address(0)
             );
 
             assertEq(
@@ -1031,7 +1042,8 @@ contract BlueprintCrossBatchMinterTest is Test {
             crossBatchMinter.batchMintAcrossCollectionsMixed(
                 user,
                 items,
-                erc20Tokens
+                erc20Tokens,
+                address(0)
             ); // NO msg.value sent
 
             assertEq(
@@ -1045,5 +1057,508 @@ contract BlueprintCrossBatchMinterTest is Test {
                 "User should have paid 100 ERC20 tokens (1M - 100)"
             );
         }
+    }
+
+    // ===== REFERRAL TESTS =====
+
+    function test_Referral_ETH_Payment() public {
+        // Setup
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        uint256 tokenId2 = factory.createNewDrop(
+            collection2,
+            0.2 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch items
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: tokenId2,
+            amount: 1
+        });
+
+        // Expect referral events from each collection (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        vm.expectEmit(true, true, true, false, address(collection2));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Execute with referrer
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollections{value: 0.3 ether}(
+            user,
+            items,
+            referrer
+        );
+
+        // Verify mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection2).balanceOf(user, tokenId2), 1);
+    }
+
+    function test_Referral_ERC20_Payment() public {
+        // Setup
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDropWithERC20(
+            collection1,
+            0,
+            100 * 10 ** 18,
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 days,
+            true,
+            false,
+            true
+        );
+        uint256 tokenId2 = factory.createNewDropWithERC20(
+            collection2,
+            0,
+            200 * 10 ** 18,
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 days,
+            true,
+            false,
+            true
+        );
+        vm.stopPrank();
+
+        // Setup user with ERC20 tokens
+        vm.prank(user);
+        mockERC20.mint(user, 1000 * 10 ** 18);
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 1000 * 10 ** 18);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch items
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: tokenId2,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // Expect referral events from each collection (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        vm.expectEmit(true, true, true, false, address(collection2));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Execute with referrer
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens,
+            referrer
+        );
+
+        // Verify mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection2).balanceOf(user, tokenId2), 1);
+    }
+
+    function test_Referral_MixedPayments() public {
+        // Setup: One collection accepts ETH, another accepts ERC20
+        vm.startPrank(admin);
+        uint256 ethTokenId = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        uint256 erc20TokenId = factory.createNewDropWithERC20(
+            collection2,
+            0,
+            100 * 10 ** 18,
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 days,
+            true,
+            false,
+            true
+        );
+        vm.stopPrank();
+
+        // Setup user
+        vm.deal(user, 1 ether);
+        vm.prank(user);
+        mockERC20.mint(user, 1000 * 10 ** 18);
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 1000 * 10 ** 18);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch items
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethTokenId,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: erc20TokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // Expect referral event for ETH payment (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Expect referral event for ERC20 payment (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection2));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Execute with referrer
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+            user,
+            items,
+            erc20Tokens,
+            referrer
+        );
+
+        // Verify mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, ethTokenId), 1);
+        assertEq(
+            BlueprintERC1155(collection2).balanceOf(user, erc20TokenId),
+            1
+        );
+    }
+
+    function test_NoReferral_WithZeroAddress() public {
+        // Setup
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+
+        // Create batch items
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1
+        });
+
+        // Should emit TokensBatchMinted but NOT ReferredBatchMint (check indexed params only)
+        vm.expectEmit(true, false, false, false, address(collection1));
+        emit BlueprintERC1155.TokensBatchMinted(
+            user,
+            new uint256[](0),
+            new uint256[](0)
+        );
+
+        // Execute with address(0) referrer - should NOT emit referral event
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollections{value: 0.1 ether}(
+            user,
+            items,
+            address(0) // No referrer
+        );
+
+        // Verify mint succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+    }
+
+    function test_Referral_MultipleItemsSameCollection() public {
+        // Setup
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        uint256 tokenId2 = factory.createNewDrop(
+            collection1,
+            0.2 ether,
+            block.timestamp,
+            block.timestamp + 1 days,
+            true
+        );
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch items from same collection
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 2
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId2,
+            amount: 1
+        });
+
+        // Expected arrays for the batch mint
+        uint256[] memory expectedTokenIds = new uint256[](2);
+        expectedTokenIds[0] = tokenId1;
+        expectedTokenIds[1] = tokenId2;
+
+        uint256[] memory expectedAmounts = new uint256[](2);
+        expectedAmounts[0] = 2;
+        expectedAmounts[1] = 1;
+
+        uint256 expectedPayment = (0.1 ether * 2) + (0.2 ether * 1); // 0.4 ether
+
+        // Expect single referral event for all items in the collection
+        vm.expectEmit(true, true, true, true, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            expectedTokenIds,
+            expectedAmounts,
+            address(0),
+            expectedPayment,
+            block.timestamp
+        );
+
+        // Execute with referrer
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollections{value: expectedPayment}(
+            user,
+            items,
+            referrer
+        );
+
+        // Verify mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 2);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId2), 1);
+    }
+
+    function test_Referral_DualPaymentDrop_PreferETH() public {
+        // Setup drop that accepts BOTH ETH and ERC20
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0.1 ether, // ETH price
+            100 * 10 ** 18, // ERC20 price
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 days,
+            true,
+            true, // ETH enabled
+            true // ERC20 enabled
+        );
+        vm.stopPrank();
+
+        vm.deal(user, 1 ether);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch item
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: address(collection1),
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // User sends ETH, so should use ETH payment (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Execute with ETH (preferETH = true)
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+            user,
+            items,
+            erc20Tokens,
+            referrer
+        );
+
+        // Verify mint succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId), 1);
+    }
+
+    function test_Referral_DualPaymentDrop_PreferERC20() public {
+        // Setup drop that accepts BOTH ETH and ERC20
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0.1 ether, // ETH price
+            100 * 10 ** 18, // ERC20 price
+            address(mockERC20),
+            block.timestamp,
+            block.timestamp + 1 days,
+            true,
+            true, // ETH enabled
+            true // ERC20 enabled
+        );
+        vm.stopPrank();
+
+        // Setup user with ERC20 tokens (no ETH sent)
+        vm.prank(user);
+        mockERC20.mint(user, 1000 * 10 ** 18);
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 1000 * 10 ** 18);
+
+        // Setup referrer
+        address referrer = makeAddr("referrer");
+
+        // Create batch item
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: address(collection1),
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // User sends NO ETH, so should use ERC20 payment (check indexed params only)
+        vm.expectEmit(true, true, true, false, address(collection1));
+        emit BlueprintERC1155.ReferredBatchMint(
+            address(crossBatchMinter),
+            referrer,
+            user,
+            new uint256[](0),
+            new uint256[](0),
+            address(0),
+            0,
+            0
+        );
+
+        // Execute with NO ETH (preferETH = false)
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens,
+            referrer
+        );
+
+        // Verify mint succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId), 1);
     }
 }

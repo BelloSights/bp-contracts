@@ -212,10 +212,12 @@ contract BlueprintCrossBatchMinter is
      * @notice For mixed payment methods (ETH + ERC20) or multiple ERC20 tokens, use batchMintAcrossCollectionsMixed
      * @param to Recipient address for all mints
      * @param items Array of mint items specifying collection, tokenId, and amount
+     * @param referrer Optional referrer address for tracking (set to address(0) if none)
      */
     function batchMintAcrossCollections(
         address to,
-        BatchMintItem[] calldata items
+        BatchMintItem[] calldata items,
+        address referrer
     ) external payable nonReentrant {
         if (items.length == 0) {
             revert BlueprintCrossBatchMinter__InvalidArrayLength();
@@ -237,7 +239,7 @@ contract BlueprintCrossBatchMinter is
         );
 
         // Execute mints for each collection
-        _executeBatchMints(to, collectionData);
+        _executeBatchMints(to, collectionData, referrer);
 
         // Refund excess payment
         if (msg.value > paymentInfo.totalETHRequired) {
@@ -276,20 +278,22 @@ contract BlueprintCrossBatchMinter is
      * @param to Recipient address for all mints
      * @param items Array of mint items specifying collection, tokenId, and amount
      * @param erc20Tokens Array of ERC20 token addresses that will be used (must include all tokens accepted by items)
+     * @param referrer Optional referrer address for tracking (set to address(0) if none)
      *
      * @custom:example Pay with USDC only (even if drops accept ETH):
-     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS])  // msg.value = 0
+     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS], address(0))  // msg.value = 0
      *
      * @custom:example Pay with ETH (for drops that accept both ETH and USDC):
-     *   batchMintAcrossCollectionsMixed{value: ethAmount}(recipient, items, [USDC_ADDRESS])
+     *   batchMintAcrossCollectionsMixed{value: ethAmount}(recipient, items, [USDC_ADDRESS], address(0))
      *
      * @custom:example Multiple ERC20 tokens (some items accept USDC, others accept DAI):
-     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS, DAI_ADDRESS])
+     *   batchMintAcrossCollectionsMixed(recipient, items, [USDC_ADDRESS, DAI_ADDRESS], referrerAddress)
      */
     function batchMintAcrossCollectionsMixed(
         address to,
         BatchMintItem[] calldata items,
-        address[] calldata erc20Tokens
+        address[] calldata erc20Tokens,
+        address referrer
     ) external payable nonReentrant {
         if (items.length == 0) {
             revert BlueprintCrossBatchMinter__InvalidArrayLength();
@@ -347,7 +351,7 @@ contract BlueprintCrossBatchMinter is
             );
 
         // Execute mints for each collection with appropriate payment method
-        _executeMixedBatchMints(to, collectionData);
+        _executeMixedBatchMints(to, collectionData, referrer);
 
         // Refund excess ETH payment
         if (msg.value > paymentInfo.totalETHRequired) {
@@ -552,20 +556,23 @@ contract BlueprintCrossBatchMinter is
      * @dev Executes batch mints for grouped collection data (ETH payments only)
      * @param to Recipient address
      * @param collectionData Array of collection mint data
+     * @param referrer Optional referrer address for tracking
      */
     function _executeBatchMints(
         address to,
-        CollectionMintData[] memory collectionData
+        CollectionMintData[] memory collectionData,
+        address referrer
     ) internal {
         for (uint256 i = 0; i < collectionData.length; i++) {
             CollectionMintData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
 
-            // Use batchMint with ETH payment
+            // Use batchMint with ETH payment and referrer
             collection.batchMint{value: data.ethPayment}(
                 to,
                 data.tokenIds,
-                data.amounts
+                data.amounts,
+                referrer
             );
 
             // Emit events for each item processed
@@ -852,21 +859,24 @@ contract BlueprintCrossBatchMinter is
      * @dev Executes mixed batch mints with both ETH and ERC20 payments
      * @param to Recipient address
      * @param collectionData Array of collection mint data
+     * @param referrer Optional referrer address for tracking
      */
     function _executeMixedBatchMints(
         address to,
-        MixedCollectionData[] memory collectionData
+        MixedCollectionData[] memory collectionData,
+        address referrer
     ) internal {
         for (uint256 i = 0; i < collectionData.length; i++) {
             MixedCollectionData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
 
             if (data.ethPayment > 0) {
-                // Use ETH payment
+                // Use ETH payment with referrer
                 collection.batchMint{value: data.ethPayment}(
                     to,
                     data.tokenIds,
-                    data.amounts
+                    data.amounts,
+                    referrer
                 );
             } else if (data.erc20Payment > 0 && data.erc20Token != address(0)) {
                 // Use ERC20 payment
@@ -880,12 +890,13 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Try batch ERC20 mint; if unavailable, fall back to per-item mints
+                // Try batch ERC20 mint with referrer; if unavailable, fall back to per-item mints
                 try
                     collection.batchMintWithERC20(
                         to,
                         data.tokenIds,
-                        data.amounts
+                        data.amounts,
+                        referrer
                     )
                 {
                     // success
@@ -896,7 +907,8 @@ contract BlueprintCrossBatchMinter is
                             collection.mintWithERC20(
                                 to,
                                 data.tokenIds[k],
-                                data.amounts[k]
+                                data.amounts[k],
+                                referrer
                             )
                         {
                             // ok
