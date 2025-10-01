@@ -890,7 +890,7 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Try batch ERC20 mint with referrer; if unavailable, fall back to per-item mints
+                // Try batch ERC20 mint with referrer
                 try
                     collection.batchMintWithERC20(
                         to,
@@ -901,34 +901,16 @@ contract BlueprintCrossBatchMinter is
                 {
                     // success
                 } catch {
-                    bool perItemSucceeded = true;
-                    for (uint256 k = 0; k < data.tokenIds.length; k++) {
-                        try
-                            collection.mintWithERC20(
-                                to,
-                                data.tokenIds[k],
-                                data.amounts[k],
-                                referrer
+                    // If batch mint fails, revert immediately to avoid partial execution gas waste
+                    // Reset approval before reverting for safety
+                    token.forceApprove(data.collection, 0);
+                    revert BlueprintCrossBatchMinter__FunctionNotSupported(
+                        bytes4(
+                            keccak256(
+                                "batchMintWithERC20(address,uint256[],uint256[],address)"
                             )
-                        {
-                            // ok
-                        } catch {
-                            perItemSucceeded = false;
-                            break;
-                        }
-                    }
-
-                    if (!perItemSucceeded) {
-                        // Reset approval before reverting for safety
-                        token.forceApprove(data.collection, 0);
-                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
-                            bytes4(
-                                keccak256(
-                                    "batchMintWithERC20(address,uint256[],uint256[])"
-                                )
-                            )
-                        );
-                    }
+                        )
+                    );
                 }
 
                 // Reset approval for security
