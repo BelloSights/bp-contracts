@@ -347,7 +347,7 @@ contract BlueprintCrossBatchMinter is
             );
 
         // Execute mints for each collection with appropriate payment method
-        _executeMixedBatchMints(to, collectionData, paymentInfo);
+        _executeMixedBatchMints(to, collectionData);
 
         // Refund excess ETH payment
         if (msg.value > paymentInfo.totalETHRequired) {
@@ -855,8 +855,7 @@ contract BlueprintCrossBatchMinter is
      */
     function _executeMixedBatchMints(
         address to,
-        MixedCollectionData[] memory collectionData,
-        MixedPaymentInfo memory
+        MixedCollectionData[] memory collectionData
     ) internal {
         for (uint256 i = 0; i < collectionData.length; i++) {
             MixedCollectionData memory data = collectionData[i];
