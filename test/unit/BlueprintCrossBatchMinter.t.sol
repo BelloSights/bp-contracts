@@ -259,37 +259,34 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 tokenId1_1 = factory.createNewDropWithERC20(
             collection1,
             0, // No ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            false, // ETH disabled
-            true // ERC20 enabled
+            false // ETH disabled
         );
 
         uint256 tokenId1_2 = factory.createNewDropWithERC20(
             collection1,
             0, // No ETH price
-            150 * 10 ** 18,
             address(mockERC20),
+            150 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
             true,
-            false, // ETH disabled
-            true
+            false // ETH disabled
         );
 
         uint256 tokenId2_1 = factory.createNewDropWithERC20(
             collection2,
             0, // No ETH price
-            120 * 10 ** 18,
             address(mockERC20),
+            120 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
             true,
-            false, // ETH disabled
-            true
+            false // ETH disabled
         );
 
         vm.stopPrank();
@@ -397,13 +394,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 erc20TokenId = factory.createNewDropWithERC20(
             collection2,
             0, // No ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            false, // ETH disabled
-            true // ERC20 enabled
+            false // ETH disabled
         );
 
         vm.stopPrank();
@@ -465,25 +461,23 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 erc20TokenId1 = factory.createNewDropWithERC20(
             collection1,
             0, // No ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            false, // ETH disabled
-            true // ERC20 enabled
+            false // ETH disabled
         );
 
         uint256 erc20TokenId2 = factory.createNewDropWithERC20(
             collection2,
             0, // No ETH price
-            200 * 10 ** 18, // ERC20 price
             address(secondERC20),
+            200 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            false, // ETH disabled
-            true // ERC20 enabled
+            false // ETH disabled
         );
 
         vm.stopPrank();
@@ -596,13 +590,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 t = factory.createNewDropWithERC20(
             collection1,
             0,
-            100 * 10 ** 18,
             address(mockERC20_2),
+            100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
             true,
-            false,
-            true
+            false
         );
         vm.stopPrank();
 
@@ -799,13 +792,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 tokenId = factory.createNewDropWithERC20(
             collection1,
             0.1 ether, // ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
             true, // active
-            true, // ETH enabled
-            true // ERC20 enabled
+            true // ETH enabled
         );
         vm.stopPrank();
 
@@ -991,24 +983,22 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 tokenId1 = factory.createNewDropWithERC20(
             collection1,
             0,
-            100 * 10 ** 18,
             address(mockERC20),
+            100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
             true,
-            false,
-            true
+            false
         );
         uint256 tokenId2 = factory.createNewDropWithERC20(
             collection2,
             0,
-            200 * 10 ** 18,
             address(mockERC20),
+            200 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
             true,
-            false,
-            true
+            false
         );
         vm.stopPrank();
 
@@ -1090,13 +1080,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 erc20TokenId = factory.createNewDropWithERC20(
             collection2,
             0,
-            100 * 10 ** 18,
             address(mockERC20),
+            100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
             true,
-            false,
-            true
+            false
         );
         vm.stopPrank();
 
@@ -1294,13 +1283,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 tokenId = factory.createNewDropWithERC20(
             collection1,
             0.1 ether, // ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 days,
             true,
-            true, // ETH enabled
-            true // ERC20 enabled
+            true // ETH enabled
         );
         vm.stopPrank();
 
@@ -1353,13 +1341,12 @@ contract BlueprintCrossBatchMinterTest is Test {
         uint256 tokenId = factory.createNewDropWithERC20(
             collection1,
             0.1 ether, // ETH price
-            100 * 10 ** 18, // ERC20 price
             address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 days,
             true,
-            true, // ETH enabled
-            true // ERC20 enabled
+            true // ETH enabled
         );
         vm.stopPrank();
 

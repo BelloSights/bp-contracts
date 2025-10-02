@@ -71,13 +71,10 @@ contract BlueprintERC1155 is
 
     struct Drop {
         uint256 price; // ETH price in wei
-        uint256 erc20Price; // ERC20 price in token units
-        address acceptedERC20; // ERC20 token address (address(0) means ERC20 not enabled)
         uint256 startTime;
         uint256 endTime;
         bool active;
         bool ethEnabled; // Whether ETH payments are enabled
-        bool erc20Enabled; // Whether ERC20 payments are enabled
     }
 
     struct FeeConfig {
@@ -110,6 +107,9 @@ contract BlueprintERC1155 is
     string private _collectionURI;
 
     mapping(uint256 => Drop) public drops;
+
+    // Multi-ERC20 support: tokenId => erc20Address => price (0 = not accepted)
+    mapping(uint256 => mapping(address => uint256)) public erc20Prices;
 
     // Default fee configuration for the collection
     FeeConfig public defaultFeeConfig;
@@ -204,6 +204,7 @@ contract BlueprintERC1155 is
     event TokenFeeConfigRemoved(uint256 indexed tokenId);
     event CollectionURIUpdated(string uri);
     event TokenURIUpdated(uint256 indexed tokenId, string uri);
+    event ERC20PriceSet(uint256 indexed tokenId, address indexed erc20Token, uint256 price);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -387,13 +388,10 @@ contract BlueprintERC1155 is
 
         drops[tokenId] = Drop({
             price: price,
-            erc20Price: 0,
-            acceptedERC20: address(0),
             startTime: startTime,
             endTime: endTime,
             active: active,
-            ethEnabled: true,
-            erc20Enabled: false
+            ethEnabled: true
         });
 
         emit DropCreated(tokenId, price, startTime, endTime);
@@ -401,32 +399,28 @@ contract BlueprintERC1155 is
     }
 
     /**
-     * @dev Creates a new drop with auto-incrementing token ID and ERC20 support - only callable by factory
+     * @dev Creates a new drop with auto-incrementing token ID and optional ERC20 support - only callable by factory
      * @param price The ETH mint price in wei
+     * @param erc20Token ERC20 token address (address(0) to skip ERC20 setup)
      * @param erc20Price The ERC20 mint price in token units
-     * @param acceptedERC20 The ERC20 token address (address(0) to disable ERC20)
      * @param startTime The timestamp when minting becomes available
      * @param endTime The timestamp when minting ends
      * @param active Whether the drop is active and mintable
      * @param ethEnabled Whether ETH payments are enabled
-     * @param erc20Enabled Whether ERC20 payments are enabled
      * @return tokenId The assigned token ID for the new drop
+     * @notice To add more ERC20 tokens, call setERC20Price after creation
      */
     function createDropWithERC20(
         uint256 price,
+        address erc20Token,
         uint256 erc20Price,
-        address acceptedERC20,
         uint256 startTime,
         uint256 endTime,
         bool active,
-        bool ethEnabled,
-        bool erc20Enabled
+        bool ethEnabled
     ) external onlyRole(FACTORY_ROLE) returns (uint256) {
         if (startTime >= endTime && endTime != 0) {
             revert BlueprintERC1155__InvalidStartEndTime();
-        }
-        if (erc20Enabled && acceptedERC20 == address(0)) {
-            revert BlueprintERC1155__InvalidERC20Address();
         }
 
         uint256 tokenId = nextTokenId;
@@ -434,14 +428,17 @@ contract BlueprintERC1155 is
 
         drops[tokenId] = Drop({
             price: price,
-            erc20Price: erc20Price,
-            acceptedERC20: acceptedERC20,
             startTime: startTime,
             endTime: endTime,
             active: active,
-            ethEnabled: ethEnabled,
-            erc20Enabled: erc20Enabled
+            ethEnabled: ethEnabled
         });
+
+        // Set ERC20 price if token provided
+        if (erc20Token != address(0) && erc20Price > 0) {
+            erc20Prices[tokenId][erc20Token] = erc20Price;
+            emit ERC20PriceSet(tokenId, erc20Token, erc20Price);
+        }
 
         emit DropCreated(tokenId, price, startTime, endTime);
         return tokenId;
@@ -473,46 +470,39 @@ contract BlueprintERC1155 is
 
         drops[tokenId] = Drop({
             price: price,
-            erc20Price: 0,
-            acceptedERC20: address(0),
             startTime: startTime,
             endTime: endTime,
             active: active,
-            ethEnabled: true,
-            erc20Enabled: false
+            ethEnabled: true
         });
 
         emit DropUpdated(tokenId, price, startTime, endTime, active);
     }
 
     /**
-     * @dev Creates or updates a drop with ERC20 support - only callable by factory
+     * @dev Creates or updates a drop with optional ERC20 support - only callable by factory
      * @param tokenId The token ID for the drop
      * @param price The ETH mint price in wei
+     * @param erc20Token ERC20 token address (address(0) to skip ERC20 setup)
      * @param erc20Price The ERC20 mint price in token units
-     * @param acceptedERC20 The ERC20 token address (address(0) to disable ERC20)
      * @param startTime The timestamp when minting becomes available
      * @param endTime The timestamp when minting ends
      * @param active Whether the drop is active and mintable
      * @param ethEnabled Whether ETH payments are enabled
-     * @param erc20Enabled Whether ERC20 payments are enabled
+     * @notice To add more ERC20 tokens, call setERC20Price separately
      */
     function setDropWithERC20(
         uint256 tokenId,
         uint256 price,
+        address erc20Token,
         uint256 erc20Price,
-        address acceptedERC20,
         uint256 startTime,
         uint256 endTime,
         bool active,
-        bool ethEnabled,
-        bool erc20Enabled
+        bool ethEnabled
     ) external onlyRole(FACTORY_ROLE) {
         if (startTime >= endTime && endTime != 0) {
             revert BlueprintERC1155__InvalidStartEndTime();
-        }
-        if (erc20Enabled && acceptedERC20 == address(0)) {
-            revert BlueprintERC1155__InvalidERC20Address();
         }
 
         // Update nextTokenId if necessary
@@ -522,16 +512,37 @@ contract BlueprintERC1155 is
 
         drops[tokenId] = Drop({
             price: price,
-            erc20Price: erc20Price,
-            acceptedERC20: acceptedERC20,
             startTime: startTime,
             endTime: endTime,
             active: active,
-            ethEnabled: ethEnabled,
-            erc20Enabled: erc20Enabled
+            ethEnabled: ethEnabled
         });
 
+        // Set ERC20 price if token provided
+        if (erc20Token != address(0) && erc20Price > 0) {
+            erc20Prices[tokenId][erc20Token] = erc20Price;
+            emit ERC20PriceSet(tokenId, erc20Token, erc20Price);
+        }
+
         emit DropUpdated(tokenId, price, startTime, endTime, active);
+    }
+
+    /**
+     * @dev Sets or updates ERC20 price for a specific token - only callable by factory
+     * @param tokenId Token ID to configure
+     * @param erc20Token ERC20 token address
+     * @param price Price in ERC20 token units (0 to disable)
+     */
+    function setERC20Price(
+        uint256 tokenId,
+        address erc20Token,
+        uint256 price
+    ) external onlyRole(FACTORY_ROLE) {
+        if (erc20Token == address(0)) {
+            revert BlueprintERC1155__InvalidERC20Address();
+        }
+        erc20Prices[tokenId][erc20Token] = price;
+        emit ERC20PriceSet(tokenId, erc20Token, price);
     }
 
     /**
@@ -610,13 +621,15 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenId Token ID to mint
      * @param amount Number of tokens to mint
+     * @param erc20Token ERC20 token address to use for payment
      */
     function mintWithERC20(
         address to,
         uint256 tokenId,
-        uint256 amount
+        uint256 amount,
+        address erc20Token
     ) external nonReentrant {
-        _mintERC20Internal(to, tokenId, amount, address(0));
+        _mintERC20Internal(to, tokenId, amount, erc20Token, address(0));
     }
 
     /**
@@ -625,15 +638,17 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenId Token ID to mint
      * @param amount Number of tokens to mint
+     * @param erc20Token ERC20 token address to use for payment
      * @param referrer Address of the referrer (set to address(0) if none)
      */
     function mintWithERC20(
         address to,
         uint256 tokenId,
         uint256 amount,
+        address erc20Token,
         address referrer
     ) external nonReentrant {
-        _mintERC20Internal(to, tokenId, amount, referrer);
+        _mintERC20Internal(to, tokenId, amount, erc20Token, referrer);
     }
 
     /**
@@ -672,13 +687,16 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenIds Array of token IDs to mint
      * @param amounts Array of token amounts to mint
+     * @param erc20Token ERC20 token address to use for payment
+     * @notice All tokens in the batch must accept the same ERC20 token
      */
     function batchMintWithERC20(
         address to,
         uint256[] memory tokenIds,
-        uint256[] memory amounts
+        uint256[] memory amounts,
+        address erc20Token
     ) external nonReentrant {
-        _batchMintERC20Internal(to, tokenIds, amounts, address(0));
+        _batchMintERC20Internal(to, tokenIds, amounts, erc20Token, address(0));
     }
 
     /**
@@ -687,15 +705,18 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenIds Array of token IDs to mint
      * @param amounts Array of token amounts to mint
+     * @param erc20Token ERC20 token address to use for payment
      * @param referrer Address of the referrer (set to address(0) if none)
+     * @notice All tokens in the batch must accept the same ERC20 token
      */
     function batchMintWithERC20(
         address to,
         uint256[] memory tokenIds,
         uint256[] memory amounts,
+        address erc20Token,
         address referrer
     ) external nonReentrant {
-        _batchMintERC20Internal(to, tokenIds, amounts, referrer);
+        _batchMintERC20Internal(to, tokenIds, amounts, erc20Token, referrer);
     }
 
     /**
@@ -705,18 +726,21 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenId Token ID to mint
      * @param amount Number of tokens to mint
+     * @param erc20Token ERC20 token address to use for payment
      * @param allowFeeOnTransfer Whether to allow fee-on-transfer tokens (if false, reverts on any fee)
      */
     function mintWithERC20BatchSafe(
         address to,
         uint256 tokenId,
         uint256 amount,
+        address erc20Token,
         bool allowFeeOnTransfer
     ) external nonReentrant {
         _mintERC20BatchSafeInternal(
             to,
             tokenId,
             amount,
+            erc20Token,
             allowFeeOnTransfer,
             address(0)
         );
@@ -728,6 +752,7 @@ contract BlueprintERC1155 is
      * @param to Recipient address
      * @param tokenId Token ID to mint
      * @param amount Number of tokens to mint
+     * @param erc20Token ERC20 token address to use for payment
      * @param allowFeeOnTransfer Whether to allow fee-on-transfer tokens
      * @param referrer Address of the referrer (set to address(0) if none)
      */
@@ -735,6 +760,7 @@ contract BlueprintERC1155 is
         address to,
         uint256 tokenId,
         uint256 amount,
+        address erc20Token,
         bool allowFeeOnTransfer,
         address referrer
     ) external nonReentrant {
@@ -742,6 +768,7 @@ contract BlueprintERC1155 is
             to,
             tokenId,
             amount,
+            erc20Token,
             allowFeeOnTransfer,
             referrer
         );
@@ -879,18 +906,22 @@ contract BlueprintERC1155 is
         address to,
         uint256 tokenId,
         uint256 amount,
+        address erc20TokenAddress,
         address referrer
     ) internal {
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
         }
-        if (!drop.erc20Enabled) {
-            revert BlueprintERC1155__ERC20NotEnabled();
-        }
-        if (drop.acceptedERC20 == address(0)) {
+        if (erc20TokenAddress == address(0)) {
             revert BlueprintERC1155__InvalidERC20Address();
         }
+        
+        uint256 erc20Price = erc20Prices[tokenId][erc20TokenAddress];
+        if (erc20Price == 0) {
+            revert BlueprintERC1155__ERC20NotEnabled();
+        }
+        
         if (block.timestamp < drop.startTime) {
             revert BlueprintERC1155__DropNotStarted();
         }
@@ -898,8 +929,8 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__DropEnded();
         }
 
-        uint256 requiredPayment = drop.erc20Price * amount;
-        IERC20 erc20Token = IERC20(drop.acceptedERC20);
+        uint256 requiredPayment = erc20Price * amount;
+        IERC20 erc20Token = IERC20(erc20TokenAddress);
 
         // Check user balance
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
@@ -936,7 +967,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        uint256 totalPrice = drop.erc20Price * amount;
+        uint256 totalPrice = requiredPayment;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
         uint256 creatorFee = (totalPrice * feeConfig.creatorBasisPoints) /
@@ -983,7 +1014,7 @@ contract BlueprintERC1155 is
             to,
             tokenId,
             amount,
-            drop.acceptedERC20,
+            erc20TokenAddress,
             totalPrice,
             block.timestamp
         );
@@ -994,7 +1025,7 @@ contract BlueprintERC1155 is
                 to,
                 tokenId,
                 amount,
-                drop.acceptedERC20,
+                erc20TokenAddress,
                 totalPrice,
                 block.timestamp
             );
@@ -1128,40 +1159,38 @@ contract BlueprintERC1155 is
         address to,
         uint256[] memory tokenIds,
         uint256[] memory amounts,
+        address erc20TokenAddress,
         address referrer
     ) internal {
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
+        if (erc20TokenAddress == address(0)) {
+            revert BlueprintERC1155__InvalidERC20Address();
+        }
 
         uint256 requiredPayment = 0;
-        address erc20Address = address(0);
         for (uint256 i = 0; i < tokenIds.length; i++) {
             Drop memory drop = drops[tokenIds[i]];
             if (!drop.active) {
                 revert BlueprintERC1155__DropNotActive();
             }
-            if (!drop.erc20Enabled) {
+            
+            uint256 erc20Price = erc20Prices[tokenIds[i]][erc20TokenAddress];
+            if (erc20Price == 0) {
                 revert BlueprintERC1155__ERC20NotEnabled();
             }
-            if (drop.acceptedERC20 == address(0)) {
-                revert BlueprintERC1155__InvalidERC20Address();
-            }
-            if (i == 0) {
-                erc20Address = drop.acceptedERC20;
-            } else if (erc20Address != drop.acceptedERC20) {
-                revert BlueprintERC1155__InvalidERC20Address();
-            }
+            
             if (block.timestamp < drop.startTime) {
                 revert BlueprintERC1155__DropNotStarted();
             }
             if (block.timestamp > drop.endTime && drop.endTime != 0) {
                 revert BlueprintERC1155__DropEnded();
             }
-            requiredPayment += drop.erc20Price * amounts[i];
+            requiredPayment += erc20Price * amounts[i];
         }
 
-        IERC20 erc20Token = IERC20(erc20Address);
+        IERC20 erc20Token = IERC20(erc20TokenAddress);
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
             revert BlueprintERC1155__InsufficientERC20Balance(
@@ -1187,8 +1216,8 @@ contract BlueprintERC1155 is
         _globalTotalSupply += totalAmount;
 
         for (uint256 i = 0; i < tokenIds.length; i++) {
-            Drop memory drop = drops[tokenIds[i]];
-            uint256 payment = drop.erc20Price * amounts[i];
+            uint256 erc20Price = erc20Prices[tokenIds[i]][erc20TokenAddress];
+            uint256 payment = erc20Price * amounts[i];
             FeeConfig memory config = getFeeConfig(tokenIds[i]);
             if (config.blueprintRecipient == address(0)) {
                 revert BlueprintERC1155__ZeroBlueprintRecipient();
@@ -1235,7 +1264,7 @@ contract BlueprintERC1155 is
             to,
             tokenIds,
             amounts,
-            erc20Address,
+            erc20TokenAddress,
             requiredPayment,
             block.timestamp
         );
@@ -1246,7 +1275,7 @@ contract BlueprintERC1155 is
                 to,
                 tokenIds,
                 amounts,
-                erc20Address,
+                erc20TokenAddress,
                 requiredPayment,
                 block.timestamp
             );
@@ -1257,6 +1286,7 @@ contract BlueprintERC1155 is
         address to,
         uint256 tokenId,
         uint256 amount,
+        address erc20TokenAddress,
         bool allowFeeOnTransfer,
         address referrer
     ) internal {
@@ -1264,12 +1294,15 @@ contract BlueprintERC1155 is
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
         }
-        if (!drop.erc20Enabled) {
-            revert BlueprintERC1155__ERC20NotEnabled();
-        }
-        if (drop.acceptedERC20 == address(0)) {
+        if (erc20TokenAddress == address(0)) {
             revert BlueprintERC1155__InvalidERC20Address();
         }
+        
+        uint256 erc20Price = erc20Prices[tokenId][erc20TokenAddress];
+        if (erc20Price == 0) {
+            revert BlueprintERC1155__ERC20NotEnabled();
+        }
+        
         if (block.timestamp < drop.startTime) {
             revert BlueprintERC1155__DropNotStarted();
         }
@@ -1277,8 +1310,8 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__DropEnded();
         }
 
-        uint256 requiredPayment = drop.erc20Price * amount;
-        IERC20 erc20Token = IERC20(drop.acceptedERC20);
+        uint256 requiredPayment = erc20Price * amount;
+        IERC20 erc20Token = IERC20(erc20TokenAddress);
 
         uint256 userBalance = erc20Token.balanceOf(msg.sender);
         if (userBalance < requiredPayment) {
@@ -1308,7 +1341,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__ZeroCreatorRecipient();
         }
 
-        uint256 totalPrice = drop.erc20Price * amount;
+        uint256 totalPrice = requiredPayment;
         uint256 platformFee = (totalPrice * feeConfig.blueprintFeeBasisPoints) /
             10000;
         uint256 creatorFee = (totalPrice * feeConfig.creatorBasisPoints) /
@@ -1384,7 +1417,7 @@ contract BlueprintERC1155 is
             to,
             tokenId,
             amount,
-            drop.acceptedERC20,
+            erc20TokenAddress,
             totalPrice,
             block.timestamp
         );
@@ -1395,7 +1428,7 @@ contract BlueprintERC1155 is
                 to,
                 tokenId,
                 amount,
-                drop.acceptedERC20,
+                erc20TokenAddress,
                 totalPrice,
                 block.timestamp
             );
@@ -1426,44 +1459,43 @@ contract BlueprintERC1155 is
     }
 
     /**
-     * @dev Get required payment amount and token address for batch transaction preparation
-     * Useful for frontends preparing batch transactions
+     * @dev Get required ETH payment amount for a drop
      * @param tokenId Token ID to query
      * @param amount Number of tokens to mint
-     * @return paymentToken Address of the ERC20 token required (address(0) for ETH)
-     * @return paymentAmount Amount of tokens required for payment
+     * @return ethPrice ETH price in wei
      * @return ethEnabled Whether ETH payments are enabled
-     * @return erc20Enabled Whether ERC20 payments are enabled
      */
-    function getPaymentInfo(
+    function getETHPaymentInfo(
         uint256 tokenId,
         uint256 amount
-    )
-        external
-        view
-        returns (
-            address paymentToken,
-            uint256 paymentAmount,
-            bool ethEnabled,
-            bool erc20Enabled
-        )
-    {
+    ) external view returns (uint256 ethPrice, bool ethEnabled) {
         Drop memory drop = drops[tokenId];
-        return (
-            drop.acceptedERC20,
-            drop.erc20Price * amount,
-            drop.ethEnabled,
-            drop.erc20Enabled
-        );
+        return (drop.price * amount, drop.ethEnabled);
+    }
+
+    /**
+     * @dev Get required ERC20 payment amount for a specific token
+     * @param tokenId Token ID to query
+     * @param erc20Token ERC20 token address to check
+     * @param amount Number of tokens to mint
+     * @return erc20Price ERC20 price in token units (0 if not accepted)
+     */
+    function getERC20PaymentInfo(
+        uint256 tokenId,
+        address erc20Token,
+        uint256 amount
+    ) external view returns (uint256 erc20Price) {
+        return erc20Prices[tokenId][erc20Token] * amount;
     }
 
     /**
      * @dev Batch-friendly function to check if user can mint with current balances/allowances
      * @param user Address to check
      * @param tokenId Token ID to check
+     * @param erc20Token ERC20 token address to check (address(0) to skip ERC20 check)
      * @param amount Amount to mint
      * @return canMintETH Whether user can mint with ETH
-     * @return canMintERC20 Whether user can mint with ERC20
+     * @return canMintERC20 Whether user can mint with specified ERC20
      * @return requiredETH Required ETH amount
      * @return requiredERC20 Required ERC20 amount
      * @return currentAllowance Current ERC20 allowance
@@ -1472,6 +1504,7 @@ contract BlueprintERC1155 is
     function checkMintEligibility(
         address user,
         uint256 tokenId,
+        address erc20Token,
         uint256 amount
     )
         external
@@ -1488,7 +1521,7 @@ contract BlueprintERC1155 is
         Drop memory drop = drops[tokenId];
 
         requiredETH = drop.price * amount;
-        requiredERC20 = drop.erc20Price * amount;
+        requiredERC20 = erc20Prices[tokenId][erc20Token] * amount;
 
         canMintETH =
             drop.active &&
@@ -1497,14 +1530,13 @@ contract BlueprintERC1155 is
             (drop.endTime == 0 || block.timestamp <= drop.endTime) &&
             user.balance >= requiredETH;
 
-        if (drop.acceptedERC20 != address(0)) {
-            IERC20 erc20Token = IERC20(drop.acceptedERC20);
-            currentBalance = erc20Token.balanceOf(user);
-            currentAllowance = erc20Token.allowance(user, address(this));
+        if (erc20Token != address(0) && requiredERC20 > 0) {
+            IERC20 token = IERC20(erc20Token);
+            currentBalance = token.balanceOf(user);
+            currentAllowance = token.allowance(user, address(this));
 
             canMintERC20 =
                 drop.active &&
-                drop.erc20Enabled &&
                 block.timestamp >= drop.startTime &&
                 (drop.endTime == 0 || block.timestamp <= drop.endTime) &&
                 currentBalance >= requiredERC20 &&
@@ -1770,51 +1802,6 @@ contract BlueprintERC1155 is
     }
 
     /**
-     * @dev Updates the ERC20 price for a drop - only callable by factory
-     * @param tokenId Token ID of the drop
-     * @param erc20Price New ERC20 price in token units
-     */
-    function setDropERC20Price(
-        uint256 tokenId,
-        uint256 erc20Price
-    ) external onlyRole(FACTORY_ROLE) {
-        drops[tokenId].erc20Price = erc20Price;
-
-        emit DropUpdated(
-            tokenId,
-            drops[tokenId].price,
-            drops[tokenId].startTime,
-            drops[tokenId].endTime,
-            drops[tokenId].active
-        );
-    }
-
-    /**
-     * @dev Updates the accepted ERC20 token for a drop - only callable by factory
-     * @param tokenId Token ID of the drop
-     * @param acceptedERC20 Address of the ERC20 token to accept (address(0) to disable)
-     */
-    function setDropAcceptedERC20(
-        uint256 tokenId,
-        address acceptedERC20
-    ) external onlyRole(FACTORY_ROLE) {
-        drops[tokenId].acceptedERC20 = acceptedERC20;
-
-        // If setting to address(0), disable ERC20 payments
-        if (acceptedERC20 == address(0)) {
-            drops[tokenId].erc20Enabled = false;
-        }
-
-        emit DropUpdated(
-            tokenId,
-            drops[tokenId].price,
-            drops[tokenId].startTime,
-            drops[tokenId].endTime,
-            drops[tokenId].active
-        );
-    }
-
-    /**
      * @dev Enables or disables ETH payments for a drop - only callable by factory
      * @param tokenId Token ID of the drop
      * @param ethEnabled Whether ETH payments are enabled
@@ -1828,54 +1815,6 @@ contract BlueprintERC1155 is
         emit DropUpdated(
             tokenId,
             drops[tokenId].price,
-            drops[tokenId].startTime,
-            drops[tokenId].endTime,
-            drops[tokenId].active
-        );
-    }
-
-    /**
-     * @dev Enables or disables ERC20 payments for a drop - only callable by factory
-     * @param tokenId Token ID of the drop
-     * @param erc20Enabled Whether ERC20 payments are enabled
-     */
-    function setDropERC20Enabled(
-        uint256 tokenId,
-        bool erc20Enabled
-    ) external onlyRole(FACTORY_ROLE) {
-        // If enabling ERC20, ensure an ERC20 token is set
-        if (erc20Enabled && drops[tokenId].acceptedERC20 == address(0)) {
-            revert BlueprintERC1155__InvalidERC20Address();
-        }
-
-        drops[tokenId].erc20Enabled = erc20Enabled;
-
-        emit DropUpdated(
-            tokenId,
-            drops[tokenId].price,
-            drops[tokenId].startTime,
-            drops[tokenId].endTime,
-            drops[tokenId].active
-        );
-    }
-
-    /**
-     * @dev Updates both ETH and ERC20 prices for a drop - only callable by factory
-     * @param tokenId Token ID of the drop
-     * @param ethPrice New ETH price in wei
-     * @param erc20Price New ERC20 price in token units
-     */
-    function setDropPrices(
-        uint256 tokenId,
-        uint256 ethPrice,
-        uint256 erc20Price
-    ) external onlyRole(FACTORY_ROLE) {
-        drops[tokenId].price = ethPrice;
-        drops[tokenId].erc20Price = erc20Price;
-
-        emit DropUpdated(
-            tokenId,
-            ethPrice,
             drops[tokenId].startTime,
             drops[tokenId].endTime,
             drops[tokenId].active

@@ -183,7 +183,6 @@ contract BlueprintERC1155ZeroTest is Test {
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
-        // ethEnabled and erc20Enabled intentionally ignored here
         vm.stopPrank();
     }
 

@@ -347,6 +347,7 @@ contract BlueprintCrossBatchMinter is
         MixedCollectionData[]
             memory collectionData = _groupItemsByCollectionMixed(
                 items,
+                erc20Tokens,
                 preferETH
             );
 
@@ -406,7 +407,6 @@ contract BlueprintCrossBatchMinter is
         BatchMintItem[] calldata items
     ) internal view returns (PaymentInfo memory) {
         PaymentInfo memory info;
-        bool hasERC20OnlyDrops = false;
 
         for (uint256 i = 0; i < items.length; i++) {
             BatchMintItem calldata item = items[i];
@@ -427,13 +427,10 @@ contract BlueprintCrossBatchMinter is
             // Get drop information
             (
                 uint256 ethPrice,
-                ,
-                address acceptedERC20,
                 uint256 startTime,
                 uint256 endTime,
                 bool active,
-                bool ethEnabled,
-                bool erc20Enabled
+                bool ethEnabled
             ) = collection.drops(item.tokenId);
 
             // Validate drop is active and within time bounds
@@ -447,14 +444,6 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Check if drop only supports ERC20
-            bool supportsETH = ethEnabled;
-            bool supportsERC20 = erc20Enabled && acceptedERC20 != address(0);
-
-            if (!supportsETH && supportsERC20) {
-                hasERC20OnlyDrops = true;
-            }
-
             // Validate ETH is enabled
             if (!ethEnabled) {
                 revert BlueprintCrossBatchMinter__ETHNotEnabled();
@@ -464,9 +453,6 @@ contract BlueprintCrossBatchMinter is
             info.totalETHRequired += ethPrice * item.amount;
             info.hasETHPayments = true;
         }
-
-        // For ETH mode, mixed methods occur if we have drops that only support ERC20
-        info.mixedPaymentMethods = hasERC20OnlyDrops;
 
         return info;
     }
@@ -530,7 +516,7 @@ contract BlueprintCrossBatchMinter is
                     BlueprintERC1155 collectionContract = BlueprintERC1155(
                         collection
                     );
-                    (uint256 ethPrice, , , , , , , ) = collectionContract.drops(
+                    (uint256 ethPrice, , , , ) = collectionContract.drops(
                         items[j].tokenId
                     );
 
@@ -673,13 +659,10 @@ contract BlueprintCrossBatchMinter is
             // Get drop information
             (
                 uint256 ethPrice,
-                uint256 erc20Price,
-                address acceptedERC20,
                 uint256 startTime,
                 uint256 endTime,
                 bool active,
-                bool ethEnabled,
-                bool erc20Enabled
+                bool ethEnabled
             ) = collection.drops(item.tokenId);
 
             // Validate drop is active and within time bounds
@@ -695,9 +678,19 @@ contract BlueprintCrossBatchMinter is
 
             // Determine payment method for this drop
             bool canUseETH = ethEnabled && ethPrice > 0;
-            bool canUseERC20 = erc20Enabled &&
-                acceptedERC20 != address(0) &&
-                erc20Price > 0;
+
+            // NEW: Find accepted ERC20 price from mapping
+            uint256 currentErc20Price = 0;
+            address currentErc20Token = address(0);
+            for (uint256 k = 0; k < erc20Tokens.length; k++) {
+                uint256 priceFromMapping = collection.erc20Prices(item.tokenId, erc20Tokens[k]);
+                if (priceFromMapping > 0) {
+                    currentErc20Price = priceFromMapping;
+                    currentErc20Token = erc20Tokens[k];
+                    break; // Use the first matching ERC20 token
+                }
+            }
+            bool canUseERC20 = currentErc20Token != address(0) && currentErc20Price > 0;
 
             // Respect user's payment preference
             bool shouldUseETH;
@@ -711,7 +704,12 @@ contract BlueprintCrossBatchMinter is
                 // Only ERC20 available
                 shouldUseETH = false;
             } else {
-                // Neither available - invalid drop
+                // Neither available - check if user provided ERC20 tokens but they don't match
+                if (erc20Tokens.length > 0 && !canUseETH) {
+                    // User provided ERC20 tokens but none match this drop's configured tokens
+                    revert BlueprintCrossBatchMinter__InvalidERC20Address();
+                }
+                // No valid payment method
                 revert BlueprintCrossBatchMinter__DropNotActive();
             }
 
@@ -721,9 +719,9 @@ contract BlueprintCrossBatchMinter is
                 // Find the ERC20 token in our requirements array
                 bool found = false;
                 for (uint256 j = 0; j < info.erc20Requirements.length; j++) {
-                    if (info.erc20Requirements[j].token == acceptedERC20) {
+                    if (info.erc20Requirements[j].token == currentErc20Token) {
                         info.erc20Requirements[j].amount +=
-                            erc20Price *
+                            currentErc20Price *
                             item.amount;
                         found = true;
                         break;
@@ -741,11 +739,13 @@ contract BlueprintCrossBatchMinter is
     /**
      * @dev Groups items by collection for mixed payment processing
      * @param items Array of mint items
+     * @param erc20Tokens Array of ERC20 tokens to check for pricing
      * @param preferETH If true, prefer ETH for drops that accept both; if false, prefer ERC20
      * @return Array of MixedCollectionData
      */
     function _groupItemsByCollectionMixed(
         BatchMintItem[] calldata items,
+        address[] calldata erc20Tokens,
         bool preferETH
     ) internal view returns (MixedCollectionData[] memory) {
         // Count unique collections
@@ -803,39 +803,41 @@ contract BlueprintCrossBatchMinter is
                     );
                     (
                         uint256 ethPrice,
-                        uint256 erc20Price,
-                        address acceptedERC20,
+                        , // Removed erc20Price
+                        , // Removed acceptedERC20
                         ,
-                        ,
-                        ,
-                        bool ethEnabled,
-                        bool erc20Enabled
+                        bool ethEnabled
+                        // Removed erc20Enabled
                     ) = collectionContract.drops(items[j].tokenId);
 
-                    // Determine payment method based on user preference
-                    bool canUseETH = ethEnabled && ethPrice > 0;
-                    bool canUseERC20 = erc20Enabled &&
-                        acceptedERC20 != address(0) &&
-                        erc20Price > 0;
-
-                    // Respect user's payment preference
-                    bool shouldUseETH;
-                    if (canUseETH && canUseERC20) {
-                        // Both available - use user's preference
-                        shouldUseETH = preferETH;
-                    } else if (canUseETH) {
-                        // Only ETH available
-                        shouldUseETH = true;
-                    } else {
-                        // Only ERC20 available (or neither, but that's caught in validation)
-                        shouldUseETH = false;
-                    }
-
-                    if (shouldUseETH) {
+                    // Determine payment method - use ETH if enabled and user prefers it, otherwise try ERC20
+                    bool useETH = (ethEnabled && ethPrice > 0 && preferETH);
+                    
+                    if (useETH || (ethEnabled && ethPrice > 0 && erc20Tokens.length == 0)) {
+                        // Use ETH
                         ethPayment += ethPrice * items[j].amount;
                     } else {
-                        erc20Payment += erc20Price * items[j].amount;
-                        erc20Token = acceptedERC20;
+                        // Try ERC20
+                        bool foundERC20;
+                        for (uint256 k = 0; k < erc20Tokens.length; k++) {
+                            uint256 p = collectionContract.erc20Prices(items[j].tokenId, erc20Tokens[k]);
+                            if (p > 0) {
+                                erc20Payment += p * items[j].amount;
+                                erc20Token = erc20Tokens[k];
+                                foundERC20 = true;
+                                break;
+                            }
+                        }
+                        if (!foundERC20 && (!ethEnabled || ethPrice == 0)) {
+                            // User provided ERC20 tokens but none match this drop's configured tokens
+                            if (erc20Tokens.length > 0) {
+                                revert BlueprintCrossBatchMinter__InvalidERC20Address();
+                            }
+                            revert BlueprintCrossBatchMinter__DropNotActive();
+                        } else if (!foundERC20) {
+                            // Fall back to ETH
+                            ethPayment += ethPrice * items[j].amount;
+                        }
                     }
 
                     currentIndex++;
@@ -896,6 +898,7 @@ contract BlueprintCrossBatchMinter is
                         to,
                         data.tokenIds,
                         data.amounts,
+                        data.erc20Token,
                         referrer
                     )
                 {
@@ -906,7 +909,8 @@ contract BlueprintCrossBatchMinter is
                         collection.batchMintWithERC20(
                             to,
                             data.tokenIds,
-                            data.amounts
+                            data.amounts,
+                            data.erc20Token
                         )
                     {
                         // success without referrer
@@ -916,7 +920,7 @@ contract BlueprintCrossBatchMinter is
                         revert BlueprintCrossBatchMinter__FunctionNotSupported(
                             bytes4(
                                 keccak256(
-                                    "batchMintWithERC20(address,uint256[],uint256[])"
+                                    "batchMintWithERC20(address,uint256[],uint256[],address)"
                                 )
                             )
                         );
