@@ -1,0 +1,1105 @@
+---
+description: Blueprint Drop Factory + Cross Batch Minting
+alwaysApply: false
+---
+# Blueprint ERC1155 Factory & Cross Batch Minter Architecture
+
+## Overview
+
+The Blueprint system is a comprehensive NFT infrastructure built on Ethereum, featuring a factory pattern for efficient ERC1155 collection deployment and advanced cross-collection batch minting capabilities. The system supports multiple payment methods (ETH + ERC20), referral systems, and gas-optimized batch operations.
+
+## System Architecture
+
+### Core Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Blueprint Ecosystem                      │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintERC1155Factory (Proxy)                           │
+│  ├── Collection Management                                 │
+│  ├── Drop Configuration                                    │
+│  ├── Fee Distribution Setup                               │
+│  └── Multi-ERC20 Support                                  │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintCrossBatchMinter (Proxy)                         │
+│  ├── Cross-Collection Minting                              │
+│  ├── Mixed Payment Processing                              │
+│  ├── Shopping Cart Functionality                          │
+│  └── Gas-Optimized Batching                               │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintERC1155 (Implementation)                         │
+│  ├── ERC1155 Standard Compliance                           │
+│  ├── Drop Management                                       │
+│  ├── Payment Processing                                    │
+│  ├── Fee Distribution                                      │
+│  └── Referral System                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## BlueprintERC1155Factory
+
+### Purpose
+Factory contract for deploying and managing BlueprintERC1155 collections using OpenZeppelin's clone pattern for gas-efficient deployment.
+
+### Key Features
+
+#### 1. Collection Lifecycle Management
+```solidity
+// Deploy new collection
+function createCollection(
+    string memory uri,
+    address creatorRecipient,
+    uint256 creatorBasisPoints
+) external returns (address);
+
+// Collection tracking
+mapping(address => bool) public isDeployedCollection;
+```
+
+#### 2. Drop Management System
+```solidity
+// ETH-only drops
+function createNewDrop(
+    address collection,
+    uint256 price,
+    uint256 startTime,
+    uint256 endTime,
+    bool active
+) external returns (uint256);
+
+// Multi-payment drops (ETH + ERC20)
+function createNewDropWithERC20(
+    address collection,
+    uint256 price,           // ETH price
+    address erc20Token,      // Initial ERC20
+    uint256 erc20Price,      // ERC20 price
+    uint256 startTime,
+    uint256 endTime,
+    bool active,
+    bool ethEnabled
+) external returns (uint256);
+```
+
+#### 3. Multi-ERC20 Support Architecture
+```solidity
+// Add additional ERC20 tokens to existing drops
+function setERC20PriceForDrop(
+    address collection,
+    uint256 tokenId,
+    address erc20Token,
+    uint256 erc20Price       // 0 to disable
+) external;
+
+// Enable/disable ETH payments
+function setDropETHEnabled(
+    address collection,
+    uint256 tokenId,
+    bool ethEnabled
+) external;
+```
+
+#### 4. Fee Configuration System
+```solidity
+struct FeeConfig {
+    address blueprintRecipient;      // Platform fee recipient
+    uint256 blueprintFeeBasisPoints; // Platform fee (100 = 1%)
+    address creatorRecipient;        // Creator fee recipient
+    uint256 creatorBasisPoints;      // Creator fee (100 = 1%)
+    address rewardPoolRecipient;     // Reward pool recipient
+    uint256 rewardPoolBasisPoints;   // Reward pool fee (100 = 1%)
+    address treasury;                // Treasury address
+}
+
+// Global fee configuration
+function setDefaultFeeConfig(
+    address _defaultBlueprintRecipient,
+    uint256 _defaultFeeBasisPoints,
+    uint256 _defaultMintFee,
+    address _defaultTreasury,
+    address _defaultRewardPoolRecipient,
+    uint256 _defaultRewardPoolBasisPoints
+) external;
+
+// Per-collection fee configuration
+function updateFeeConfig(
+    address collection,
+    address blueprintRecipient,
+    uint256 blueprintFeeBasisPoints,
+    address creator,
+    uint256 creatorBasisPoints,
+    address rewardPoolRecipient,
+    uint256 rewardPoolBasisPoints,
+    address treasury
+) external;
+```
+
+#### 5. Collection Metadata Management
+```solidity
+// Update collection metadata
+function updateCollectionURI(address collection, string memory uri) external;
+function updateCollectionName(address collection, string memory name) external;
+function updateCollectionSymbol(address collection, string memory symbol) external;
+function updateTokenURI(address collection, uint256 tokenId, string memory tokenURI) external;
+```
+
+### Factory Access Control
+
+```solidity
+// Roles
+bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+// Admin functions
+function setImplementation(address _implementation) external onlyRole(DEFAULT_ADMIN_ROLE);
+function setFactory(address _factory) external onlyRole(DEFAULT_ADMIN_ROLE);
+```
+
+## BlueprintCrossBatchMinter
+
+### Purpose
+Enables batch minting across multiple BlueprintERC1155 collections in a single transaction, supporting both pure ETH payments and mixed payment methods (ETH + multiple ERC20 tokens).
+
+### Architecture Overview
+
+#### 1. Payment Method Support
+```solidity
+// ETH-only batch minting (simpler, more gas-efficient)
+function batchMintAcrossCollections(
+    address to,
+    BatchMintItem[] calldata items,
+    address referrer
+) external payable;
+
+// Mixed payment batch minting (maximum flexibility)
+function batchMintAcrossCollectionsMixed(
+    address to,
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    address referrer
+) external payable;
+```
+
+#### 2. Data Structures
+```solidity
+struct BatchMintItem {
+    address collection;  // BlueprintERC1155 collection address
+    uint256 tokenId;    // Token ID to mint
+    uint256 amount;     // Amount to mint
+}
+
+struct PaymentInfo {
+    uint256 totalETHRequired;
+    uint256 totalERC20Required;
+    address erc20Token;
+    bool hasETHPayments;
+    bool hasERC20Payments;
+    bool mixedPaymentMethods;
+}
+
+struct MixedPaymentInfo {
+    uint256 totalETHRequired;
+    ERC20Requirement[] erc20Requirements;
+}
+
+struct ERC20Requirement {
+    address token;
+    uint256 amount;
+}
+```
+
+#### 3. Payment Analysis System
+```solidity
+// Analyze payment requirements for ETH-only minting
+function _analyzePaymentRequirements(
+    BatchMintItem[] calldata items
+) internal view returns (PaymentInfo memory);
+
+// Analyze payment requirements for mixed payment minting
+function _analyzeMixedPaymentRequirements(
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    bool preferETH
+) internal view returns (MixedPaymentInfo memory);
+```
+
+#### 4. Collection Grouping & Optimization
+```solidity
+// Group items by collection for efficient batch processing
+function _groupItemsByCollection(
+    BatchMintItem[] calldata items
+) internal view returns (CollectionMintData[] memory);
+
+// Group items by collection with mixed payment support
+function _groupItemsByCollectionMixed(
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    bool preferETH
+) internal view returns (MixedCollectionData[] memory);
+```
+
+#### 5. Payment Method Selection Logic
+```solidity
+// User preference determination
+bool preferETH = msg.value > 0;
+
+// Payment method selection for dual-payment drops:
+// - User sends ETH (msg.value > 0) → Prefer ETH
+// - User sends NO ETH (msg.value == 0) → Prefer ERC20
+```
+
+### Cross-Batch Minter Features
+
+#### 1. Shopping Cart Functionality
+- **Multi-collection support**: Mint from different collections in single transaction
+- **Mixed payment methods**: Some items ETH, others ERC20
+- **Gas optimization**: Batch operations reduce transaction costs
+- **Atomic transactions**: All mints succeed or all fail
+
+#### 2. Payment Flexibility
+```solidity
+// Scenario 1: Pure ETH payments
+crossBatchMinter.batchMintAcrossCollections{value: totalETH}(
+    recipient, items, referrer
+);
+
+// Scenario 2: Mixed payments (ETH + multiple ERC20s)
+address[] memory erc20Tokens = [address(usdc), address(dai), address(usdt)];
+crossBatchMinter.batchMintAcrossCollectionsMixed{value: partialETH}(
+    recipient, items, erc20Tokens, referrer
+);
+```
+
+#### 3. Error Handling & Validation
+```solidity
+// Comprehensive error system
+error BlueprintCrossBatchMinter__InvalidArrayLength();
+error BlueprintCrossBatchMinter__InvalidCollection(address collection);
+error BlueprintCrossBatchMinter__ZeroAmount();
+error BlueprintCrossBatchMinter__InsufficientPayment(uint256 required, uint256 provided);
+error BlueprintCrossBatchMinter__MixedPaymentMethods();
+error BlueprintCrossBatchMinter__InsufficientERC20Balance(uint256 required, uint256 balance);
+error BlueprintCrossBatchMinter__InsufficientERC20Allowance(uint256 required, uint256 allowance);
+error BlueprintCrossBatchMinter__DropNotActive();
+error BlueprintCrossBatchMinter__DropNotStarted();
+error BlueprintCrossBatchMinter__DropEnded();
+error BlueprintCrossBatchMinter__ETHNotEnabled();
+error BlueprintCrossBatchMinter__ERC20NotEnabled();
+error BlueprintCrossBatchMinter__InvalidERC20Address();
+error BlueprintCrossBatchMinter__FunctionNotSupported(bytes4 selector);
+```
+
+## BlueprintERC1155 Implementation
+
+### Core Features
+
+#### 1. ERC1155 Standard Compliance
+```solidity
+// Standard ERC1155 functions
+function mint(address to, uint256 tokenId, uint256 amount) external payable;
+function batchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts) external payable;
+
+// Enhanced minting with referrer support
+function mint(address to, uint256 tokenId, uint256 amount, address referrer) external payable;
+function batchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts, address referrer) external payable;
+```
+
+#### 2. Multi-Payment Support
+```solidity
+// ERC20 minting functions
+function mintWithERC20(address to, uint256 tokenId, uint256 amount, address erc20Token) external;
+function batchMintWithERC20(address to, uint256[] memory tokenIds, uint256[] memory amounts, address erc20Token) external;
+
+// Enhanced ERC20 minting with referrer support
+function mintWithERC20(address to, uint256 tokenId, uint256 amount, address erc20Token, address referrer) external;
+function batchMintWithERC20(address to, uint256[] memory tokenIds, uint256[] memory amounts, address erc20Token, address referrer) external;
+```
+
+#### 3. Drop Management System
+```solidity
+struct Drop {
+    uint256 price;        // ETH price in wei
+    uint256 startTime;    // Drop start timestamp
+    uint256 endTime;      // Drop end timestamp
+    bool active;          // Whether drop is active
+    bool ethEnabled;      // Whether ETH payments are enabled
+}
+
+// Multi-ERC20 pricing support
+mapping(uint256 => mapping(address => uint256)) public erc20Prices;
+```
+
+#### 4. Fee Distribution System
+```solidity
+// Automatic fee distribution on mint
+function _distributeFees(uint256 tokenId, uint256 paymentAmount, address paymentToken) internal {
+    FeeConfig memory config = feeConfigs[tokenId];
+    if (config.blueprintRecipient == address(0)) {
+        config = defaultFeeConfig;
+    }
+    
+    // Calculate and distribute fees
+    uint256 blueprintFee = (paymentAmount * config.blueprintFeeBasisPoints) / 10000;
+    uint256 creatorFee = (paymentAmount * config.creatorBasisPoints) / 10000;
+    uint256 rewardPoolFee = (paymentAmount * config.rewardPoolBasisPoints) / 10000;
+    uint256 treasuryAmount = paymentAmount - blueprintFee - creatorFee - rewardPoolFee;
+    
+    // Transfer fees to recipients
+    // ... implementation details
+}
+```
+
+#### 5. Referral System
+```solidity
+// Referral tracking and rewards
+mapping(address => uint256) public referralRewards;
+mapping(address => uint256) public referralCount;
+
+// Referral events
+event ReferredMint(
+    address indexed user,
+    address indexed referrer,
+    address indexed recipient,
+    uint256 tokenId,
+    uint256 amount,
+    address paymentToken,
+    uint256 paymentAmount,
+    uint256 timestamp
+);
+```
+
+## System Integration
+
+### 1. Factory → Collection → Minter Flow
+
+```solidity
+// 1. Factory creates collection
+address collection = factory.createCollection(uri, creator, creatorBasis);
+
+// 2. Factory configures drops
+uint256 tokenId = factory.createNewDropWithERC20(
+    collection, price, erc20Token, erc20Price, startTime, endTime, active, ethEnabled
+);
+
+// 3. Factory adds additional ERC20s
+factory.setERC20PriceForDrop(collection, tokenId, additionalToken, additionalPrice);
+
+// 4. Users mint via Cross-Batch Minter
+crossBatchMinter.batchMintAcrossCollectionsMixed{value: ethAmount}(
+    recipient, items, erc20Tokens, referrer
+);
+```
+
+### 2. Payment Processing Flow
+
+```mermaid
+graph TD
+    A[User Initiates Batch Mint] --> B{Payment Method}
+    B -->|ETH Only| C[Analyze ETH Requirements]
+    B -->|Mixed Payment| D[Analyze Mixed Requirements]
+    C --> E[Validate ETH Balance]
+    D --> F[Validate ETH + ERC20 Balances/Allowances]
+    E --> G[Group by Collection]
+    F --> H[Group by Collection + Payment Method]
+    G --> I[Execute ETH Mints]
+    H --> J[Execute Mixed Mints]
+    I --> K[Distribute Fees]
+    J --> K
+    K --> L[Emit Events]
+    L --> M[Refund Excess ETH]
+```
+
+### 3. Gas Optimization Strategies
+
+#### Batch Operations
+- **Collection grouping**: Process multiple items per collection in single call
+- **Payment batching**: Aggregate payments before distribution
+- **Event optimization**: Emit events per collection, not per item
+
+#### Stack Depth Management
+- **Single ERC20 per creation**: Avoid stack overflow in drop creation
+- **Modular functions**: Break complex operations into smaller functions
+- **Direct storage access**: Minimize local variable usage
+
+## Security Architecture
+
+### 1. Access Control
+```solidity
+// Role-based access control
+bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
+bytes32 public constant CREATOR_ROLE = keccak256("CREATOR_ROLE");
+bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+// Function-level permissions
+modifier onlyRole(bytes32 role) {
+    _checkRole(role, _msgSender());
+    _;
+}
+```
+
+### 2. Reentrancy Protection
+```solidity
+// ReentrancyGuard on all minting functions
+modifier nonReentrant() {
+    _nonReentrantBefore();
+    _;
+    _nonReentrantAfter();
+}
+```
+
+### 3. Payment Security
+```solidity
+// SafeERC20 for token transfers
+using SafeERC20 for IERC20;
+
+// Balance validation before transfers
+if (token.balanceOf(msg.sender) < requiredAmount) {
+    revert InsufficientBalance();
+}
+
+// Allowance validation
+if (token.allowance(msg.sender, address(this)) < requiredAmount) {
+    revert InsufficientAllowance();
+}
+```
+
+### 4. Upgrade Safety
+```solidity
+// UUPS upgradeable pattern
+function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+// Storage layout preservation
+// All state variables maintain their positions across upgrades
+```
+
+## Event System
+
+### Factory Events
+```solidity
+event CollectionCreated(address indexed creator, address indexed collection, string uri);
+event DefaultFeeConfigUpdated(address blueprintRecipient, uint256 blueprintFeeBasisPoints, uint256 defaultMintFee, address treasury, address rewardPoolRecipient, uint256 rewardPoolBasisPoints);
+event CollectionUpdated(address indexed collection, string action);
+event DropCreated(address indexed collection, uint256 indexed tokenId, uint256 price);
+```
+
+### Cross-Batch Minter Events
+```solidity
+event CrossCollectionBatchMint(address indexed user, address indexed recipient, uint256 totalCollections, uint256 totalItems, address indexed paymentToken, uint256 totalPayment);
+event BatchMintItemProcessed(address indexed collection, uint256 indexed tokenId, uint256 amount, address indexed recipient);
+event CrossCollectionMixedBatchMint(address indexed user, address indexed recipient, uint256 totalCollections, uint256 totalItems, uint256 totalETHPaid, ERC20Requirement[] erc20Payments);
+```
+
+### Collection Events
+```solidity
+event DropCreated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime);
+event DropUpdated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime, bool active);
+event ERC20PriceSet(uint256 indexed tokenId, address indexed erc20Token, uint256 price);
+event ReferredMint(address indexed user, address indexed referrer, address indexed recipient, uint256 tokenId, uint256 amount, address paymentToken, uint256 paymentAmount, uint256 timestamp);
+```
+
+## Deployment Architecture
+
+### Proxy Pattern
+```solidity
+// Factory uses UUPS proxy pattern
+contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUPSUpgradeable
+
+// Cross-Batch Minter uses UUPS proxy pattern  
+contract BlueprintCrossBatchMinter is Initializable, AccessControlUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable
+
+// Collections use clone pattern for gas efficiency
+address clone = Clones.clone(implementation);
+```
+
+### Gas Optimization
+- **Clone pattern**: New collections are gas-efficient clones
+- **Shared implementation**: Single implementation for all collections
+- **Batch operations**: Process multiple items in single transaction
+- **Storage optimization**: Minimal state variables, efficient mappings
+
+## Best Practices
+
+### For Creators
+1. **Start simple**: Create drops with basic ETH/ERC20 support
+2. **Add complexity gradually**: Use `setERC20PriceForDrop` to add more tokens
+3. **Test thoroughly**: Validate payment methods before going live
+4. **Monitor gas costs**: Batch operations for better efficiency
+
+### For Developers
+1. **Use appropriate functions**: Choose ETH-only vs mixed payment based on needs
+2. **Handle errors gracefully**: Implement proper error handling for all scenarios
+3. **Optimize for gas**: Use batch operations when possible
+4. **Validate inputs**: Check balances and allowances before transactions
+
+### For Users
+1. **Approve tokens**: Set ERC20 allowances before batch minting
+2. **Check estimates**: Use payment estimation functions before transactions
+3. **Understand preferences**: Know how payment method selection works
+4. **Monitor costs**: Consider gas costs for batch operations
+
+## Future Enhancements
+
+### Planned Features
+- **Dynamic pricing**: Market-based price adjustments
+- **Advanced analytics**: Detailed usage and performance metrics
+- **Cross-chain support**: Multi-chain deployment capabilities
+- **Enhanced referral system**: More sophisticated reward mechanisms
+
+### Upgrade Considerations
+- **Storage layout**: Maintain compatibility across upgrades
+- **Function signatures**: Preserve existing interfaces
+- **Event compatibility**: Ensure event compatibility with existing systems
+- **Migration tools**: Provide tools for upgrading existing collections
+
+---
+
+**Note**: This architecture provides a comprehensive, scalable foundation for NFT collection management and cross-collection batch minting, with built-in support for multiple payment methods, referral systems, and gas optimization strategies.# Blueprint ERC1155 Factory & Cross Batch Minter Architecture
+
+## Overview
+
+The Blueprint system is a comprehensive NFT infrastructure built on Ethereum, featuring a factory pattern for efficient ERC1155 collection deployment and advanced cross-collection batch minting capabilities. The system supports multiple payment methods (ETH + ERC20), referral systems, and gas-optimized batch operations.
+
+## System Architecture
+
+### Core Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Blueprint Ecosystem                      │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintERC1155Factory (Proxy)                           │
+│  ├── Collection Management                                 │
+│  ├── Drop Configuration                                    │
+│  ├── Fee Distribution Setup                               │
+│  └── Multi-ERC20 Support                                  │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintCrossBatchMinter (Proxy)                         │
+│  ├── Cross-Collection Minting                              │
+│  ├── Mixed Payment Processing                              │
+│  ├── Shopping Cart Functionality                          │
+│  └── Gas-Optimized Batching                               │
+├─────────────────────────────────────────────────────────────┤
+│  BlueprintERC1155 (Implementation)                         │
+│  ├── ERC1155 Standard Compliance                           │
+│  ├── Drop Management                                       │
+│  ├── Payment Processing                                    │
+│  ├── Fee Distribution                                      │
+│  └── Referral System                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## BlueprintERC1155Factory
+
+### Purpose
+Factory contract for deploying and managing BlueprintERC1155 collections using OpenZeppelin's clone pattern for gas-efficient deployment.
+
+### Key Features
+
+#### 1. Collection Lifecycle Management
+```solidity
+// Deploy new collection
+function createCollection(
+    string memory uri,
+    address creatorRecipient,
+    uint256 creatorBasisPoints
+) external returns (address);
+
+// Collection tracking
+mapping(address => bool) public isDeployedCollection;
+```
+
+#### 2. Drop Management System
+```solidity
+// ETH-only drops
+function createNewDrop(
+    address collection,
+    uint256 price,
+    uint256 startTime,
+    uint256 endTime,
+    bool active
+) external returns (uint256);
+
+// Multi-payment drops (ETH + ERC20)
+function createNewDropWithERC20(
+    address collection,
+    uint256 price,           // ETH price
+    address erc20Token,      // Initial ERC20
+    uint256 erc20Price,      // ERC20 price
+    uint256 startTime,
+    uint256 endTime,
+    bool active,
+    bool ethEnabled
+) external returns (uint256);
+```
+
+#### 3. Multi-ERC20 Support Architecture
+```solidity
+// Add additional ERC20 tokens to existing drops
+function setERC20PriceForDrop(
+    address collection,
+    uint256 tokenId,
+    address erc20Token,
+    uint256 erc20Price       // 0 to disable
+) external;
+
+// Enable/disable ETH payments
+function setDropETHEnabled(
+    address collection,
+    uint256 tokenId,
+    bool ethEnabled
+) external;
+```
+
+#### 4. Fee Configuration System
+```solidity
+struct FeeConfig {
+    address blueprintRecipient;      // Platform fee recipient
+    uint256 blueprintFeeBasisPoints; // Platform fee (100 = 1%)
+    address creatorRecipient;        // Creator fee recipient
+    uint256 creatorBasisPoints;      // Creator fee (100 = 1%)
+    address rewardPoolRecipient;     // Reward pool recipient
+    uint256 rewardPoolBasisPoints;   // Reward pool fee (100 = 1%)
+    address treasury;                // Treasury address
+}
+
+// Global fee configuration
+function setDefaultFeeConfig(
+    address _defaultBlueprintRecipient,
+    uint256 _defaultFeeBasisPoints,
+    uint256 _defaultMintFee,
+    address _defaultTreasury,
+    address _defaultRewardPoolRecipient,
+    uint256 _defaultRewardPoolBasisPoints
+) external;
+
+// Per-collection fee configuration
+function updateFeeConfig(
+    address collection,
+    address blueprintRecipient,
+    uint256 blueprintFeeBasisPoints,
+    address creator,
+    uint256 creatorBasisPoints,
+    address rewardPoolRecipient,
+    uint256 rewardPoolBasisPoints,
+    address treasury
+) external;
+```
+
+#### 5. Collection Metadata Management
+```solidity
+// Update collection metadata
+function updateCollectionURI(address collection, string memory uri) external;
+function updateCollectionName(address collection, string memory name) external;
+function updateCollectionSymbol(address collection, string memory symbol) external;
+function updateTokenURI(address collection, uint256 tokenId, string memory tokenURI) external;
+```
+
+### Factory Access Control
+
+```solidity
+// Roles
+bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+// Admin functions
+function setImplementation(address _implementation) external onlyRole(DEFAULT_ADMIN_ROLE);
+function setFactory(address _factory) external onlyRole(DEFAULT_ADMIN_ROLE);
+```
+
+## BlueprintCrossBatchMinter
+
+### Purpose
+Enables batch minting across multiple BlueprintERC1155 collections in a single transaction, supporting both pure ETH payments and mixed payment methods (ETH + multiple ERC20 tokens).
+
+### Architecture Overview
+
+#### 1. Payment Method Support
+```solidity
+// ETH-only batch minting (simpler, more gas-efficient)
+function batchMintAcrossCollections(
+    address to,
+    BatchMintItem[] calldata items,
+    address referrer
+) external payable;
+
+// Mixed payment batch minting (maximum flexibility)
+function batchMintAcrossCollectionsMixed(
+    address to,
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    address referrer
+) external payable;
+```
+
+#### 2. Data Structures
+```solidity
+struct BatchMintItem {
+    address collection;  // BlueprintERC1155 collection address
+    uint256 tokenId;    // Token ID to mint
+    uint256 amount;     // Amount to mint
+}
+
+struct PaymentInfo {
+    uint256 totalETHRequired;
+    uint256 totalERC20Required;
+    address erc20Token;
+    bool hasETHPayments;
+    bool hasERC20Payments;
+    bool mixedPaymentMethods;
+}
+
+struct MixedPaymentInfo {
+    uint256 totalETHRequired;
+    ERC20Requirement[] erc20Requirements;
+}
+
+struct ERC20Requirement {
+    address token;
+    uint256 amount;
+}
+```
+
+#### 3. Payment Analysis System
+```solidity
+// Analyze payment requirements for ETH-only minting
+function _analyzePaymentRequirements(
+    BatchMintItem[] calldata items
+) internal view returns (PaymentInfo memory);
+
+// Analyze payment requirements for mixed payment minting
+function _analyzeMixedPaymentRequirements(
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    bool preferETH
+) internal view returns (MixedPaymentInfo memory);
+```
+
+#### 4. Collection Grouping & Optimization
+```solidity
+// Group items by collection for efficient batch processing
+function _groupItemsByCollection(
+    BatchMintItem[] calldata items
+) internal view returns (CollectionMintData[] memory);
+
+// Group items by collection with mixed payment support
+function _groupItemsByCollectionMixed(
+    BatchMintItem[] calldata items,
+    address[] calldata erc20Tokens,
+    bool preferETH
+) internal view returns (MixedCollectionData[] memory);
+```
+
+#### 5. Payment Method Selection Logic
+```solidity
+// User preference determination
+bool preferETH = msg.value > 0;
+
+// Payment method selection for dual-payment drops:
+// - User sends ETH (msg.value > 0) → Prefer ETH
+// - User sends NO ETH (msg.value == 0) → Prefer ERC20
+```
+
+### Cross-Batch Minter Features
+
+#### 1. Shopping Cart Functionality
+- **Multi-collection support**: Mint from different collections in single transaction
+- **Mixed payment methods**: Some items ETH, others ERC20
+- **Gas optimization**: Batch operations reduce transaction costs
+- **Atomic transactions**: All mints succeed or all fail
+
+#### 2. Payment Flexibility
+```solidity
+// Scenario 1: Pure ETH payments
+crossBatchMinter.batchMintAcrossCollections{value: totalETH}(
+    recipient, items, referrer
+);
+
+// Scenario 2: Mixed payments (ETH + multiple ERC20s)
+address[] memory erc20Tokens = [address(usdc), address(dai), address(usdt)];
+crossBatchMinter.batchMintAcrossCollectionsMixed{value: partialETH}(
+    recipient, items, erc20Tokens, referrer
+);
+```
+
+#### 3. Error Handling & Validation
+```solidity
+// Comprehensive error system
+error BlueprintCrossBatchMinter__InvalidArrayLength();
+error BlueprintCrossBatchMinter__InvalidCollection(address collection);
+error BlueprintCrossBatchMinter__ZeroAmount();
+error BlueprintCrossBatchMinter__InsufficientPayment(uint256 required, uint256 provided);
+error BlueprintCrossBatchMinter__MixedPaymentMethods();
+error BlueprintCrossBatchMinter__InsufficientERC20Balance(uint256 required, uint256 balance);
+error BlueprintCrossBatchMinter__InsufficientERC20Allowance(uint256 required, uint256 allowance);
+error BlueprintCrossBatchMinter__DropNotActive();
+error BlueprintCrossBatchMinter__DropNotStarted();
+error BlueprintCrossBatchMinter__DropEnded();
+error BlueprintCrossBatchMinter__ETHNotEnabled();
+error BlueprintCrossBatchMinter__ERC20NotEnabled();
+error BlueprintCrossBatchMinter__InvalidERC20Address();
+error BlueprintCrossBatchMinter__FunctionNotSupported(bytes4 selector);
+```
+
+## BlueprintERC1155 Implementation
+
+### Core Features
+
+#### 1. ERC1155 Standard Compliance
+```solidity
+// Standard ERC1155 functions
+function mint(address to, uint256 tokenId, uint256 amount) external payable;
+function batchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts) external payable;
+
+// Enhanced minting with referrer support
+function mint(address to, uint256 tokenId, uint256 amount, address referrer) external payable;
+function batchMint(address to, uint256[] memory tokenIds, uint256[] memory amounts, address referrer) external payable;
+```
+
+#### 2. Multi-Payment Support
+```solidity
+// ERC20 minting functions
+function mintWithERC20(address to, uint256 tokenId, uint256 amount, address erc20Token) external;
+function batchMintWithERC20(address to, uint256[] memory tokenIds, uint256[] memory amounts, address erc20Token) external;
+
+// Enhanced ERC20 minting with referrer support
+function mintWithERC20(address to, uint256 tokenId, uint256 amount, address erc20Token, address referrer) external;
+function batchMintWithERC20(address to, uint256[] memory tokenIds, uint256[] memory amounts, address erc20Token, address referrer) external;
+```
+
+#### 3. Drop Management System
+```solidity
+struct Drop {
+    uint256 price;        // ETH price in wei
+    uint256 startTime;    // Drop start timestamp
+    uint256 endTime;      // Drop end timestamp
+    bool active;          // Whether drop is active
+    bool ethEnabled;      // Whether ETH payments are enabled
+}
+
+// Multi-ERC20 pricing support
+mapping(uint256 => mapping(address => uint256)) public erc20Prices;
+```
+
+#### 4. Fee Distribution System
+```solidity
+// Automatic fee distribution on mint
+function _distributeFees(uint256 tokenId, uint256 paymentAmount, address paymentToken) internal {
+    FeeConfig memory config = feeConfigs[tokenId];
+    if (config.blueprintRecipient == address(0)) {
+        config = defaultFeeConfig;
+    }
+    
+    // Calculate and distribute fees
+    uint256 blueprintFee = (paymentAmount * config.blueprintFeeBasisPoints) / 10000;
+    uint256 creatorFee = (paymentAmount * config.creatorBasisPoints) / 10000;
+    uint256 rewardPoolFee = (paymentAmount * config.rewardPoolBasisPoints) / 10000;
+    uint256 treasuryAmount = paymentAmount - blueprintFee - creatorFee - rewardPoolFee;
+    
+    // Transfer fees to recipients
+    // ... implementation details
+}
+```
+
+#### 5. Referral System
+```solidity
+// Referral tracking and rewards
+mapping(address => uint256) public referralRewards;
+mapping(address => uint256) public referralCount;
+
+// Referral events
+event ReferredMint(
+    address indexed user,
+    address indexed referrer,
+    address indexed recipient,
+    uint256 tokenId,
+    uint256 amount,
+    address paymentToken,
+    uint256 paymentAmount,
+    uint256 timestamp
+);
+```
+
+## System Integration
+
+### 1. Factory → Collection → Minter Flow
+
+```solidity
+// 1. Factory creates collection
+address collection = factory.createCollection(uri, creator, creatorBasis);
+
+// 2. Factory configures drops
+uint256 tokenId = factory.createNewDropWithERC20(
+    collection, price, erc20Token, erc20Price, startTime, endTime, active, ethEnabled
+);
+
+// 3. Factory adds additional ERC20s
+factory.setERC20PriceForDrop(collection, tokenId, additionalToken, additionalPrice);
+
+// 4. Users mint via Cross-Batch Minter
+crossBatchMinter.batchMintAcrossCollectionsMixed{value: ethAmount}(
+    recipient, items, erc20Tokens, referrer
+);
+```
+
+### 2. Payment Processing Flow
+
+```mermaid
+graph TD
+    A[User Initiates Batch Mint] --> B{Payment Method}
+    B -->|ETH Only| C[Analyze ETH Requirements]
+    B -->|Mixed Payment| D[Analyze Mixed Requirements]
+    C --> E[Validate ETH Balance]
+    D --> F[Validate ETH + ERC20 Balances/Allowances]
+    E --> G[Group by Collection]
+    F --> H[Group by Collection + Payment Method]
+    G --> I[Execute ETH Mints]
+    H --> J[Execute Mixed Mints]
+    I --> K[Distribute Fees]
+    J --> K
+    K --> L[Emit Events]
+    L --> M[Refund Excess ETH]
+```
+
+### 3. Gas Optimization Strategies
+
+#### Batch Operations
+- **Collection grouping**: Process multiple items per collection in single call
+- **Payment batching**: Aggregate payments before distribution
+- **Event optimization**: Emit events per collection, not per item
+
+#### Stack Depth Management
+- **Single ERC20 per creation**: Avoid stack overflow in drop creation
+- **Modular functions**: Break complex operations into smaller functions
+- **Direct storage access**: Minimize local variable usage
+
+## Security Architecture
+
+### 1. Access Control
+```solidity
+// Role-based access control
+bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
+bytes32 public constant CREATOR_ROLE = keccak256("CREATOR_ROLE");
+bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+// Function-level permissions
+modifier onlyRole(bytes32 role) {
+    _checkRole(role, _msgSender());
+    _;
+}
+```
+
+### 2. Reentrancy Protection
+```solidity
+// ReentrancyGuard on all minting functions
+modifier nonReentrant() {
+    _nonReentrantBefore();
+    _;
+    _nonReentrantAfter();
+}
+```
+
+### 3. Payment Security
+```solidity
+// SafeERC20 for token transfers
+using SafeERC20 for IERC20;
+
+// Balance validation before transfers
+if (token.balanceOf(msg.sender) < requiredAmount) {
+    revert InsufficientBalance();
+}
+
+// Allowance validation
+if (token.allowance(msg.sender, address(this)) < requiredAmount) {
+    revert InsufficientAllowance();
+}
+```
+
+### 4. Upgrade Safety
+```solidity
+// UUPS upgradeable pattern
+function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+// Storage layout preservation
+// All state variables maintain their positions across upgrades
+```
+
+## Event System
+
+### Factory Events
+```solidity
+event CollectionCreated(address indexed creator, address indexed collection, string uri);
+event DefaultFeeConfigUpdated(address blueprintRecipient, uint256 blueprintFeeBasisPoints, uint256 defaultMintFee, address treasury, address rewardPoolRecipient, uint256 rewardPoolBasisPoints);
+event CollectionUpdated(address indexed collection, string action);
+event DropCreated(address indexed collection, uint256 indexed tokenId, uint256 price);
+```
+
+### Cross-Batch Minter Events
+```solidity
+event CrossCollectionBatchMint(address indexed user, address indexed recipient, uint256 totalCollections, uint256 totalItems, address indexed paymentToken, uint256 totalPayment);
+event BatchMintItemProcessed(address indexed collection, uint256 indexed tokenId, uint256 amount, address indexed recipient);
+event CrossCollectionMixedBatchMint(address indexed user, address indexed recipient, uint256 totalCollections, uint256 totalItems, uint256 totalETHPaid, ERC20Requirement[] erc20Payments);
+```
+
+### Collection Events
+```solidity
+event DropCreated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime);
+event DropUpdated(uint256 indexed tokenId, uint256 price, uint256 startTime, uint256 endTime, bool active);
+event ERC20PriceSet(uint256 indexed tokenId, address indexed erc20Token, uint256 price);
+event ReferredMint(address indexed user, address indexed referrer, address indexed recipient, uint256 tokenId, uint256 amount, address paymentToken, uint256 paymentAmount, uint256 timestamp);
+```
+
+## Deployment Architecture
+
+### Proxy Pattern
+```solidity
+// Factory uses UUPS proxy pattern
+contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUPSUpgradeable
+
+// Cross-Batch Minter uses UUPS proxy pattern  
+contract BlueprintCrossBatchMinter is Initializable, AccessControlUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable
+
+// Collections use clone pattern for gas efficiency
+address clone = Clones.clone(implementation);
+```
+
+### Gas Optimization
+- **Clone pattern**: New collections are gas-efficient clones
+- **Shared implementation**: Single implementation for all collections
+- **Batch operations**: Process multiple items in single transaction
+- **Storage optimization**: Minimal state variables, efficient mappings
+
+## Best Practices
+
+### For Creators
+1. **Start simple**: Create drops with basic ETH/ERC20 support
+2. **Add complexity gradually**: Use `setERC20PriceForDrop` to add more tokens
+3. **Test thoroughly**: Validate payment methods before going live
+4. **Monitor gas costs**: Batch operations for better efficiency
+
+### For Developers
+1. **Use appropriate functions**: Choose ETH-only vs mixed payment based on needs
+2. **Handle errors gracefully**: Implement proper error handling for all scenarios
+3. **Optimize for gas**: Use batch operations when possible
+4. **Validate inputs**: Check balances and allowances before transactions
+
+### For Users
+1. **Approve tokens**: Set ERC20 allowances before batch minting
+2. **Check estimates**: Use payment estimation functions before transactions
+3. **Understand preferences**: Know how payment method selection works
+4. **Monitor costs**: Consider gas costs for batch operations
+
+## Future Enhancements
+
+### Planned Features
+- **Dynamic pricing**: Market-based price adjustments
+- **Advanced analytics**: Detailed usage and performance metrics
+- **Cross-chain support**: Multi-chain deployment capabilities
+- **Enhanced referral system**: More sophisticated reward mechanisms
+
+### Upgrade Considerations
+- **Storage layout**: Maintain compatibility across upgrades
+- **Function signatures**: Preserve existing interfaces
+- **Event compatibility**: Ensure event compatibility with existing systems
+- **Migration tools**: Provide tools for upgrading existing collections
+
+---
+
+**Note**: This architecture provides a comprehensive, scalable foundation for NFT collection management and cross-collection batch minting, with built-in support for multiple payment methods, referral systems, and gas optimization strategies.
