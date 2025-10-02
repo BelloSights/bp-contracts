@@ -22,7 +22,11 @@ import "./BlueprintERC1155.sol";
  * Can be used to manage and modify ERC1155 collections.
  * @custom:oz-upgrades-from BlueprintERC1155Factory
  */
-contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
+contract BlueprintERC1155Factory is
+    Initializable,
+    AccessControlUpgradeable,
+    UUPSUpgradeable
+{
     // ===== ERRORS =====
     error BlueprintERC1155Factory__NotDeployedCollection(address collection);
     error BlueprintERC1155Factory__ZeroBlueprintRecipient();
@@ -44,7 +48,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
     mapping(address => bool) public isDeployedCollection;
 
     // Events
-    event CollectionCreated(address indexed creator, address indexed collection, string uri);
+    event CollectionCreated(
+        address indexed creator,
+        address indexed collection,
+        string uri
+    );
 
     event DefaultFeeConfigUpdated(
         address blueprintRecipient,
@@ -57,7 +65,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
 
     event CollectionUpdated(address indexed collection, string action);
 
-    event DropCreated(address indexed collection, uint256 indexed tokenId, uint256 price);
+    event DropCreated(
+        address indexed collection,
+        uint256 indexed tokenId,
+        uint256 price
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -104,17 +116,17 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @dev Authorizes an upgrade to a new implementation
      * @param newImplementation Address of the new implementation
      */
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyRole(UPGRADER_ROLE)
-    {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 
     /**
      * @dev Updates the implementation contract
      * @param _implementation New implementation address
      */
-    function setImplementation(address _implementation) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setImplementation(
+        address _implementation
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         implementation = _implementation;
     }
 
@@ -200,17 +212,22 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @dev Returns the default fee configuration for new collections
      * @return A struct containing default fee configuration values
      */
-    function getDefaultFeeConfig() external view returns (BlueprintERC1155.FeeConfig memory) {
+    function getDefaultFeeConfig()
+        external
+        view
+        returns (BlueprintERC1155.FeeConfig memory)
+    {
         // For creator values, we return empty defaults since they are set during collection creation
-        return BlueprintERC1155.FeeConfig({
-            blueprintRecipient: defaultBlueprintRecipient,
-            blueprintFeeBasisPoints: defaultFeeBasisPoints,
-            creatorRecipient: address(0), // Will be set during collection creation
-            creatorBasisPoints: 0, // Will be set during collection creation
-            rewardPoolRecipient: defaultRewardPoolRecipient,
-            rewardPoolBasisPoints: defaultRewardPoolBasisPoints,
-            treasury: defaultTreasury
-        });
+        return
+            BlueprintERC1155.FeeConfig({
+                blueprintRecipient: defaultBlueprintRecipient,
+                blueprintFeeBasisPoints: defaultFeeBasisPoints,
+                creatorRecipient: address(0), // Will be set during collection creation
+                creatorBasisPoints: 0, // Will be set during collection creation
+                rewardPoolRecipient: defaultRewardPoolRecipient,
+                rewardPoolBasisPoints: defaultRewardPoolBasisPoints,
+                treasury: defaultTreasury
+            });
     }
 
     /**
@@ -218,7 +235,9 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection to query
      * @return Total supply of all tokens in the collection
      */
-    function getCollectionTotalSupply(address collection) external view returns (uint256) {
+    function getCollectionTotalSupply(
+        address collection
+    ) external view returns (uint256) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -232,11 +251,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID to query
      * @return Total supply of the specified token ID
      */
-    function getTokenTotalSupply(address collection, uint256 tokenId)
-        external
-        view
-        returns (uint256)
-    {
+    function getTokenTotalSupply(
+        address collection,
+        uint256 tokenId
+    ) external view returns (uint256) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -266,7 +284,12 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
-        uint256 tokenId = BlueprintERC1155(collection).createDrop(price, startTime, endTime, active);
+        uint256 tokenId = BlueprintERC1155(collection).createDrop(
+            price,
+            startTime,
+            endTime,
+            active
+        );
 
         emit DropCreated(collection, tokenId, price);
         return tokenId;
@@ -293,7 +316,13 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
-        BlueprintERC1155(collection).setDrop(tokenId, price, startTime, endTime, active);
+        BlueprintERC1155(collection).setDrop(
+            tokenId,
+            price,
+            startTime,
+            endTime,
+            active
+        );
 
         emit CollectionUpdated(collection, "createDrop");
     }
@@ -304,10 +333,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID for the drop
      * @param price New price in wei
      */
-    function updateDropPrice(address collection, uint256 tokenId, uint256 price)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateDropPrice(
+        address collection,
+        uint256 tokenId,
+        uint256 price
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -323,10 +353,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID for the drop
      * @param startTime New start time
      */
-    function updateDropStartTime(address collection, uint256 tokenId, uint256 startTime)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateDropStartTime(
+        address collection,
+        uint256 tokenId,
+        uint256 startTime
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -342,10 +373,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID for the drop
      * @param endTime New end time
      */
-    function updateDropEndTime(address collection, uint256 tokenId, uint256 endTime)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateDropEndTime(
+        address collection,
+        uint256 tokenId,
+        uint256 endTime
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -361,10 +393,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID for the drop
      * @param active Whether the drop is active
      */
-    function setDropActive(address collection, uint256 tokenId, bool active)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setDropActive(
+        address collection,
+        uint256 tokenId,
+        bool active
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -377,14 +410,14 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
     /**
      * @dev Creates a new drop with auto-incremented token ID and ERC20 support
      * @param collection Address of the collection
-     * @param price ETH price in wei
+     * @param price ETH price in wei (0 = free mint with protocol fee)
      * @param erc20Token ERC20 token address
      * @param erc20Price ERC20 price in token units
      * @param startTime Start time timestamp
      * @param endTime End time timestamp
      * @param active Whether the drop is active
-     * @param ethEnabled Whether ETH payments are enabled
      * @return tokenId The newly created drop's token ID
+     * @notice ETH is always enabled
      */
     function createNewDropWithERC20(
         address collection,
@@ -393,15 +426,19 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
         uint256 erc20Price,
         uint256 startTime,
         uint256 endTime,
-        bool active,
-        bool ethEnabled
+        bool active
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
         uint256 tokenId = BlueprintERC1155(collection).createDropWithERC20(
-            price, erc20Token, erc20Price, startTime, endTime, active, ethEnabled
+            price,
+            erc20Token,
+            erc20Price,
+            startTime,
+            endTime,
+            active
         );
 
         emit CollectionUpdated(collection, "createDropWithERC20");
@@ -412,13 +449,13 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @dev Creates or updates a drop with ERC20 support
      * @param collection Address of the collection
      * @param tokenId Token ID for the drop
-     * @param price ETH price in wei
+     * @param price ETH price in wei (0 = free mint with protocol fee)
      * @param erc20Token ERC20 token address
      * @param erc20Price ERC20 price in token units
      * @param startTime Start time timestamp
      * @param endTime End time timestamp
      * @param active Whether the drop is active
-     * @param ethEnabled Whether ETH payments are enabled
+     * @notice ETH is always enabled
      */
     function setDropWithERC20(
         address collection,
@@ -428,15 +465,20 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
         uint256 erc20Price,
         uint256 startTime,
         uint256 endTime,
-        bool active,
-        bool ethEnabled
+        bool active
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
         BlueprintERC1155(collection).setDropWithERC20(
-            tokenId, price, erc20Token, erc20Price, startTime, endTime, active, ethEnabled
+            tokenId,
+            price,
+            erc20Token,
+            erc20Price,
+            startTime,
+            endTime,
+            active
         );
 
         emit CollectionUpdated(collection, "setDropWithERC20");
@@ -459,28 +501,54 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
-        BlueprintERC1155(collection).setERC20Price(tokenId, erc20Token, erc20Price);
+        BlueprintERC1155(collection).setERC20Price(
+            tokenId,
+            erc20Token,
+            erc20Price
+        );
 
         emit CollectionUpdated(collection, "setERC20PriceForDrop");
     }
 
     /**
-     * @dev Enables or disables ETH payments for a drop
+     * @dev Sets the protocol fee for free ETH mints on a collection
      * @param collection Address of the collection
-     * @param tokenId Token ID of the drop
-     * @param ethEnabled Whether ETH payments are enabled
+     * @param protocolFeeETH Protocol fee in wei (e.g., 111000000000000 = 0.000111 ETH)
      */
-    function setDropETHEnabled(address collection, uint256 tokenId, bool ethEnabled)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function setProtocolFeeETH(
+        address collection,
+        uint256 protocolFeeETH
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
-        BlueprintERC1155(collection).setDropETHEnabled(tokenId, ethEnabled);
+        BlueprintERC1155(collection).setProtocolFeeETH(protocolFeeETH);
 
-        emit CollectionUpdated(collection, "setDropETHEnabled");
+        emit CollectionUpdated(collection, "setProtocolFeeETH");
+    }
+
+    /**
+     * @dev Sets the protocol fee for free ERC20 mints on a collection
+     * @param collection Address of the collection
+     * @param erc20Token ERC20 token address
+     * @param protocolFee Protocol fee in token units (e.g., USDC with 6 decimals: 300000 = $0.30)
+     */
+    function setProtocolFeeERC20(
+        address collection,
+        address erc20Token,
+        uint256 protocolFee
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).setProtocolFeeERC20(
+            erc20Token,
+            protocolFee
+        );
+
+        emit CollectionUpdated(collection, "setProtocolFeeERC20");
     }
 
     /**
@@ -488,10 +556,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param uri New URI for collection metadata
      */
-    function updateCollectionURI(address collection, string memory uri)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateCollectionURI(
+        address collection,
+        string memory uri
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -507,10 +575,11 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID to update URI for
      * @param tokenURI New URI for the token
      */
-    function updateTokenURI(address collection, uint256 tokenId, string memory tokenURI)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateTokenURI(
+        address collection,
+        uint256 tokenId,
+        string memory tokenURI
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -525,10 +594,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param name New name for the collection
      */
-    function updateCollectionName(address collection, string memory name)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateCollectionName(
+        address collection,
+        string memory name
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -543,10 +612,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param symbol New symbol for the collection
      */
-    function updateCollectionSymbol(address collection, string memory symbol)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateCollectionSymbol(
+        address collection,
+        string memory symbol
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -656,10 +725,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param tokenId Token ID to remove custom fee configuration for
      */
-    function removeTokenFeeConfig(address collection, uint256 tokenId)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function removeTokenFeeConfig(
+        address collection,
+        uint256 tokenId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -674,10 +743,10 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param creator New creator recipient
      */
-    function updateCreatorRecipient(address collection, address creator)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateCreatorRecipient(
+        address collection,
+        address creator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -696,15 +765,17 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param collection Address of the collection
      * @param rewardPoolRecipient New reward pool recipient
      */
-    function updateRewardPoolRecipient(address collection, address rewardPoolRecipient)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function updateRewardPoolRecipient(
+        address collection,
+        address rewardPoolRecipient
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
 
-        BlueprintERC1155(collection).setRewardPoolRecipient(rewardPoolRecipient);
+        BlueprintERC1155(collection).setRewardPoolRecipient(
+            rewardPoolRecipient
+        );
 
         emit CollectionUpdated(collection, "updateRewardPoolRecipient");
     }
@@ -716,10 +787,12 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
      * @param tokenId Token ID to mint
      * @param amount Number of tokens to mint
      */
-    function adminMint(address collection, address to, uint256 tokenId, uint256 amount)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function adminMint(
+        address collection,
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!isDeployedCollection[collection]) {
             revert BlueprintERC1155Factory__NotDeployedCollection(collection);
         }
@@ -754,12 +827,9 @@ contract BlueprintERC1155Factory is Initializable, AccessControlUpgradeable, UUP
     /**
      * @dev See {IERC165-supportsInterface}.
      */
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(AccessControlUpgradeable)
-        returns (bool)
-    {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }

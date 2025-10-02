@@ -176,8 +176,7 @@ contract BlueprintERC1155FactoryTest is Test {
             uint256 price,
             uint256 dropsStartTime,
             uint256 dropsEndTime,
-            bool active,
-
+            bool active
         ) = collectionContract.drops(dropId);
 
         assertEq(price, defaultMintFee);
@@ -978,8 +977,7 @@ contract BlueprintERC1155FactoryTest is Test {
             erc20Price,
             startTime,
             endTime,
-            true, // active
-            true // eth enabled
+            true // active
         );
 
         // Verify drop details
@@ -988,15 +986,13 @@ contract BlueprintERC1155FactoryTest is Test {
             uint256 price,
             uint256 start,
             uint256 end,
-            bool active,
-
+            bool active
         ) = collectionContract.drops(tokenId);
 
         assertEq(price, ethPrice);
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
-
         vm.stopPrank();
     }
 
@@ -1033,7 +1029,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Mint with ERC20
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        collectionContract.mintWithERC20(user1, 0, nftAmount, address(mockERC20));
+        collectionContract.mintWithERC20(
+            user1,
+            0,
+            nftAmount,
+            address(mockERC20)
+        );
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), nftAmount);
@@ -1080,8 +1081,7 @@ contract BlueprintERC1155FactoryTest is Test {
             150 * 10 ** 18, // 150 tokens
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true, // active
-            true // eth enabled
+            true // active
         );
         vm.stopPrank();
 
@@ -1109,7 +1109,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Batch mint with ERC20
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        collectionContract.batchMintWithERC20(user1, tokenIds, amounts, address(mockERC20));
+        collectionContract.batchMintWithERC20(
+            user1,
+            tokenIds,
+            amounts,
+            address(mockERC20)
+        );
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), 1);
@@ -1130,8 +1135,7 @@ contract BlueprintERC1155FactoryTest is Test {
             0, // ERC20 disabled (price = 0)
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true, // active
-            true // eth enabled
+            true // active
         );
         vm.stopPrank();
 
@@ -1218,11 +1222,19 @@ contract BlueprintERC1155FactoryTest is Test {
         vm.startPrank(admin);
 
         uint256 newERC20Price = 200 * 10 ** 18; // 200 tokens
-        factory.setERC20PriceForDrop(collection, 0, address(mockERC20), newERC20Price);
+        factory.setERC20PriceForDrop(
+            collection,
+            0,
+            address(mockERC20),
+            newERC20Price
+        );
 
         // Verify price was updated
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        uint256 erc20Price = collectionContract.erc20Prices(0, address(mockERC20));
+        uint256 erc20Price = collectionContract.erc20Prices(
+            0,
+            address(mockERC20)
+        );
         assertEq(erc20Price, newERC20Price);
 
         vm.stopPrank();
@@ -1238,11 +1250,19 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Verify ERC20 was disabled
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        uint256 erc20Price = collectionContract.erc20Prices(0, address(mockERC20));
+        uint256 erc20Price = collectionContract.erc20Prices(
+            0,
+            address(mockERC20)
+        );
         assertEq(erc20Price, 0);
 
         // Re-enable ERC20 (set price to non-zero)
-        factory.setERC20PriceForDrop(collection, 0, address(mockERC20), 100 * 10 ** 18);
+        factory.setERC20PriceForDrop(
+            collection,
+            0,
+            address(mockERC20),
+            100 * 10 ** 18
+        );
 
         // Verify ERC20 was re-enabled
         erc20Price = collectionContract.erc20Prices(0, address(mockERC20));
@@ -1345,7 +1365,6 @@ contract BlueprintERC1155FactoryTest is Test {
             150 * 10 ** 18,
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true,
             true
         );
         vm.stopPrank();
@@ -1468,7 +1487,6 @@ contract BlueprintERC1155FactoryTest is Test {
             200 * 10 ** 18, // Different price
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true,
             true
         );
         vm.stopPrank();
@@ -1579,7 +1597,13 @@ contract BlueprintERC1155FactoryTest is Test {
             block.timestamp
         );
 
-        collectionContract.mintWithERC20BatchSafe(user1, 0, nftAmount, address(mockERC20), false); // Strict mode - no fee-on-transfer
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            nftAmount,
+            address(mockERC20),
+            false
+        ); // Strict mode - no fee-on-transfer
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), nftAmount);
@@ -1593,12 +1617,15 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
         // Test ETH payment info
-        (uint256 ethPrice, bool ethEnabled) = collectionContract.getETHPaymentInfo(0, 2);
+        uint256 ethPrice = collectionContract.getETHPaymentInfo(0, 2);
         assertEq(ethPrice, 2 ether); // 1 ether * 2
-        assertTrue(ethEnabled);
 
         // Test ERC20 payment info
-        uint256 erc20Price = collectionContract.getERC20PaymentInfo(0, address(mockERC20), 2);
+        uint256 erc20Price = collectionContract.getERC20PaymentInfo(
+            0,
+            address(mockERC20),
+            2
+        );
         assertEq(erc20Price, 200 * 10 ** 18); // 100 * 2
     }
 
@@ -1625,7 +1652,12 @@ contract BlueprintERC1155FactoryTest is Test {
             uint256 requiredERC20,
             uint256 currentAllowance,
             uint256 currentBalance
-        ) = collectionContract.checkMintEligibility(user1, 0, address(mockERC20), 2);
+        ) = collectionContract.checkMintEligibility(
+                user1,
+                0,
+                address(mockERC20),
+                2
+            );
 
         assertTrue(canMintETH);
         assertTrue(canMintERC20);
@@ -1798,7 +1830,13 @@ contract BlueprintERC1155FactoryTest is Test {
             erc20Price,
             block.timestamp
         );
-        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20), referrer);
+        collectionContract.mintWithERC20(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            referrer
+        );
 
         // Non-referred path should NOT emit ReferredMint
         vm.recordLogs();
@@ -1944,7 +1982,13 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Non-referred path should NOT emit referral
         vm.recordLogs();
-        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, address(mockERC20), false);
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            false
+        );
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 topicReferredMint = keccak256(
             "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
@@ -2040,11 +2084,23 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
         // Test strict mode (should work with normal tokens)
-        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, address(mockERC20), false); // Strict mode
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            false
+        ); // Strict mode
         assertEq(collectionContract.balanceOf(user1, 0), 1);
 
         // Test permissive mode (allows fee-on-transfer tokens)
-        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, address(mockERC20), true); // Allow fee-on-transfer
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            true
+        ); // Allow fee-on-transfer
         assertEq(collectionContract.balanceOf(user1, 0), 2);
 
         vm.stopPrank();

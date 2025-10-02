@@ -263,8 +263,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
-            true, // active
-            false // ETH disabled
+            true // active
         );
 
         uint256 tokenId1_2 = factory.createNewDropWithERC20(
@@ -274,8 +273,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             150 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
-            true,
-            false // ETH disabled
+            true
         );
 
         uint256 tokenId2_1 = factory.createNewDropWithERC20(
@@ -285,8 +283,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             120 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
-            true,
-            false // ETH disabled
+            true
         );
 
         vm.stopPrank();
@@ -398,8 +395,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
-            true, // active
-            false // ETH disabled
+            true // active
         );
 
         vm.stopPrank();
@@ -465,8 +461,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
-            true, // active
-            false // ETH disabled
+            true // active
         );
 
         uint256 erc20TokenId2 = factory.createNewDropWithERC20(
@@ -476,8 +471,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             200 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
-            true, // active
-            false // ETH disabled
+            true // active
         );
 
         vm.stopPrank();
@@ -594,8 +588,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 hours,
-            true,
-            false
+            true
         );
         vm.stopPrank();
 
@@ -796,8 +789,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 hours,
-            true, // active
-            true // ETH enabled
+            true // active
         );
         vm.stopPrank();
 
@@ -987,8 +979,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
-            true,
-            false
+            true
         );
         uint256 tokenId2 = factory.createNewDropWithERC20(
             collection2,
@@ -997,8 +988,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             200 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
-            true,
-            false
+            true
         );
         vm.stopPrank();
 
@@ -1084,8 +1074,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18,
             block.timestamp,
             block.timestamp + 1 days,
-            true,
-            false
+            true
         );
         vm.stopPrank();
 
@@ -1287,8 +1276,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 days,
-            true,
-            true // ETH enabled
+            true
         );
         vm.stopPrank();
 
@@ -1345,8 +1333,7 @@ contract BlueprintCrossBatchMinterTest is Test {
             100 * 10 ** 18, // ERC20 price
             block.timestamp,
             block.timestamp + 1 days,
-            true,
-            true // ETH enabled
+            true
         );
         vm.stopPrank();
 

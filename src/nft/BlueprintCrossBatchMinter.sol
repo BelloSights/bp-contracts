@@ -429,8 +429,7 @@ contract BlueprintCrossBatchMinter is
                 uint256 ethPrice,
                 uint256 startTime,
                 uint256 endTime,
-                bool active,
-                bool ethEnabled
+                bool active
             ) = collection.drops(item.tokenId);
 
             // Validate drop is active and within time bounds
@@ -442,11 +441,6 @@ contract BlueprintCrossBatchMinter is
             }
             if (block.timestamp > endTime && endTime != 0) {
                 revert BlueprintCrossBatchMinter__DropEnded();
-            }
-
-            // Validate ETH is enabled
-            if (!ethEnabled) {
-                revert BlueprintCrossBatchMinter__ETHNotEnabled();
             }
 
             // Calculate ETH payment
@@ -516,7 +510,7 @@ contract BlueprintCrossBatchMinter is
                     BlueprintERC1155 collectionContract = BlueprintERC1155(
                         collection
                     );
-                    (uint256 ethPrice, , , , ) = collectionContract.drops(
+                    (uint256 ethPrice, , , ) = collectionContract.drops(
                         items[j].tokenId
                     );
 
@@ -661,8 +655,7 @@ contract BlueprintCrossBatchMinter is
                 uint256 ethPrice,
                 uint256 startTime,
                 uint256 endTime,
-                bool active,
-                bool ethEnabled
+                bool active
             ) = collection.drops(item.tokenId);
 
             // Validate drop is active and within time bounds
@@ -676,21 +669,25 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Determine payment method for this drop
-            bool canUseETH = ethEnabled && ethPrice > 0;
+            // Determine payment method for this drop (ETH is always enabled)
+            bool canUseETH = ethPrice >= 0; // Always true since ETH is always enabled
 
             // NEW: Find accepted ERC20 price from mapping
             uint256 currentErc20Price = 0;
             address currentErc20Token = address(0);
             for (uint256 k = 0; k < erc20Tokens.length; k++) {
-                uint256 priceFromMapping = collection.erc20Prices(item.tokenId, erc20Tokens[k]);
+                uint256 priceFromMapping = collection.erc20Prices(
+                    item.tokenId,
+                    erc20Tokens[k]
+                );
                 if (priceFromMapping > 0) {
                     currentErc20Price = priceFromMapping;
                     currentErc20Token = erc20Tokens[k];
                     break; // Use the first matching ERC20 token
                 }
             }
-            bool canUseERC20 = currentErc20Token != address(0) && currentErc20Price > 0;
+            bool canUseERC20 = currentErc20Token != address(0) &&
+                currentErc20Price > 0;
 
             // Respect user's payment preference
             bool shouldUseETH;
@@ -797,46 +794,41 @@ contract BlueprintCrossBatchMinter is
                     tokenIds[currentIndex] = items[j].tokenId;
                     amounts[currentIndex] = items[j].amount;
 
-                    // Get payment info for this item
-                    BlueprintERC1155 collectionContract = BlueprintERC1155(
-                        collection
-                    );
-                    (
-                        uint256 ethPrice,
-                        , // Removed erc20Price
-                        , // Removed acceptedERC20
-                        ,
-                        bool ethEnabled
-                        // Removed erc20Enabled
-                    ) = collectionContract.drops(items[j].tokenId);
+                    // Get ETH price (ETH always enabled)
+                    BlueprintERC1155 ctr = BlueprintERC1155(collection);
+                    (uint256 ethPrice, , , ) = ctr.drops(items[j].tokenId);
 
-                    // Determine payment method - use ETH if enabled and user prefers it, otherwise try ERC20
-                    bool useETH = (ethEnabled && ethPrice > 0 && preferETH);
-                    
-                    if (useETH || (ethEnabled && ethPrice > 0 && erc20Tokens.length == 0)) {
-                        // Use ETH
+                    // Use ETH if: (preferred AND ethPrice > 0) OR no ERC20 specified
+                    if (
+                        (preferETH && ethPrice > 0) || erc20Tokens.length == 0
+                    ) {
                         ethPayment += ethPrice * items[j].amount;
                     } else {
-                        // Try ERC20
-                        bool foundERC20;
-                        for (uint256 k = 0; k < erc20Tokens.length; k++) {
-                            uint256 p = collectionContract.erc20Prices(items[j].tokenId, erc20Tokens[k]);
-                            if (p > 0) {
-                                erc20Payment += p * items[j].amount;
-                                erc20Token = erc20Tokens[k];
-                                foundERC20 = true;
-                                break;
+                        // Try to use ERC20
+                        uint256 foundPrice = 0;
+                        address foundToken = address(0);
+                        for (
+                            uint256 k = 0;
+                            k < erc20Tokens.length && foundPrice == 0;
+                            k++
+                        ) {
+                            foundPrice = ctr.erc20Prices(
+                                items[j].tokenId,
+                                erc20Tokens[k]
+                            );
+                            if (foundPrice > 0) {
+                                foundToken = erc20Tokens[k];
                             }
                         }
-                        if (!foundERC20 && (!ethEnabled || ethPrice == 0)) {
-                            // User provided ERC20 tokens but none match this drop's configured tokens
-                            if (erc20Tokens.length > 0) {
-                                revert BlueprintCrossBatchMinter__InvalidERC20Address();
-                            }
-                            revert BlueprintCrossBatchMinter__DropNotActive();
-                        } else if (!foundERC20) {
-                            // Fall back to ETH
+                        // Use ERC20 if found, otherwise fallback to ETH (if price > 0)
+                        if (foundPrice > 0) {
+                            erc20Payment += foundPrice * items[j].amount;
+                            erc20Token = foundToken;
+                        } else if (ethPrice > 0) {
                             ethPayment += ethPrice * items[j].amount;
+                        } else {
+                            // No payment method available (ethPrice = 0 and no matching ERC20)
+                            revert BlueprintCrossBatchMinter__InvalidERC20Address();
                         }
                     }
 
