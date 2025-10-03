@@ -1383,4 +1383,1161 @@ contract BlueprintCrossBatchMinterTest is Test {
         // Verify mint succeeded
         assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId), 1);
     }
+
+    // ===== BUG FIX REGRESSION TESTS =====
+    // These tests specifically cover the bug where _groupItemsByCollectionMixed
+    // incorrectly defaulted to ETH payment when ethPrice = 0 and no ERC20 tokens provided
+
+    function test_RevertWhen_ZeroEthPrice_NoERC20Tokens_Provided() public {
+        // CRITICAL BUG TEST: Drop with ethPrice = 0 but has ERC20 price
+        // User calls mixed function WITHOUT providing ERC20 tokens array
+        // Should revert with InvalidERC20Address, not try to use ETH
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // ethPrice = 0 (ERC20-only drop)
+            address(mockERC20),
+            100 * 10 ** 18, // ERC20 price exists
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        // User provides EMPTY ERC20 tokens array (common mistake)
+        address[] memory erc20Tokens = new address[](0);
+
+        // Approve ERC20 just in case
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        // Should revert with DropNotActive (no valid payment method: ethPrice=0 and no ERC20 tokens provided)
+        // The bug would have caused it to try ETH payment with ethPrice=0
+        vm.prank(user);
+        vm.expectRevert(
+            BlueprintCrossBatchMinter
+                .BlueprintCrossBatchMinter__DropNotActive
+                .selector
+        );
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+    }
+
+    function test_RevertWhen_ZeroEthPrice_WrongERC20Token_Provided() public {
+        // Drop accepts mockERC20_2, but user provides mockERC20
+        // With ethPrice = 0, should revert and not try to use ETH
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // ethPrice = 0
+            address(mockERC20_2), // Drop accepts mockERC20_2
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        // User provides WRONG ERC20 token
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20); // Wrong token!
+
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        // Should revert with InvalidERC20Address
+        // The bug would have caused it to fall back to ETH with ethPrice=0
+        vm.prank(user);
+        vm.expectRevert(
+            BlueprintCrossBatchMinter
+                .BlueprintCrossBatchMinter__InvalidERC20Address
+                .selector
+        );
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+    }
+
+    function test_SuccessWhen_ZeroEthPrice_CorrectERC20Token_Provided() public {
+        // Positive test: Drop with ethPrice = 0, correct ERC20 token provided
+        // Should successfully mint with ERC20
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // ethPrice = 0 (ERC20-only)
+            address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        // User provides correct ERC20 token
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+
+        // Should succeed with ERC20 payment (no ETH sent)
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify mint succeeded with ERC20 payment
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId), 1);
+        assertEq(
+            mockERC20.balanceOf(user),
+            userErc20Before - 100 * 10 ** 18,
+            "Should have paid with ERC20"
+        );
+    }
+
+    function test_GetMixedPaymentEstimate_ZeroEthPrice_NoERC20Tokens() public {
+        // Test that getMixedPaymentEstimate also correctly handles ethPrice=0
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // ethPrice = 0
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        // Empty ERC20 tokens array
+        address[] memory erc20Tokens = new address[](0);
+
+        // Should revert with DropNotActive when estimating payment for ERC20-only drop without ERC20 tokens
+        vm.expectRevert(
+            BlueprintCrossBatchMinter
+                .BlueprintCrossBatchMinter__DropNotActive
+                .selector
+        );
+        crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, false);
+    }
+
+    function test_GetMixedPaymentEstimate_ZeroEthPrice_CorrectERC20Token()
+        public
+    {
+        // Test that getMixedPaymentEstimate correctly returns ERC20 requirements
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // ethPrice = 0
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 2 // Mint 2 to test calculation
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, false);
+
+        // Should require 0 ETH and correct ERC20 amount
+        assertEq(ethRequired, 0, "Should not require ETH when ethPrice=0");
+        assertEq(erc20Requirements.length, 1);
+        assertEq(erc20Requirements[0].token, address(mockERC20));
+        assertEq(
+            erc20Requirements[0].amount,
+            200 * 10 ** 18,
+            "Should require correct ERC20 amount (2 * 100)"
+        );
+    }
+
+    function test_MixedPayment_MultipleDrops_SomeZeroEthPrice() public {
+        // Real-world scenario: Shopping cart with mix of drops
+        // Drop 1: ethPrice = 0.1 ETH (has ETH price)
+        // Drop 2: ethPrice = 0, ERC20 price = 100 tokens (ERC20-only)
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDrop(
+            collection1,
+            0.1 ether, // Has ETH price
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId2 = factory.createNewDropWithERC20(
+            collection2,
+            0, // ethPrice = 0 (ERC20-only)
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: tokenId2,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // Get payment estimate
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(
+                items,
+                erc20Tokens,
+                true // preferETH
+            );
+
+        // Should require ETH for drop1, ERC20 for drop2
+        assertEq(ethRequired, 0.1 ether, "Should require ETH for drop1");
+        assertEq(
+            erc20Requirements[0].amount,
+            100 * 10 ** 18,
+            "Should require ERC20 for drop2"
+        );
+
+        // Execute the mixed payment
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        uint256 userEthBefore = user.balance;
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify both mints succeeded with correct payments
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection2).balanceOf(user, tokenId2), 1);
+        assertEq(
+            user.balance,
+            userEthBefore - 0.1 ether,
+            "Should have paid 0.1 ETH"
+        );
+        assertEq(
+            mockERC20.balanceOf(user),
+            userErc20Before - 100 * 10 ** 18,
+            "Should have paid 100 ERC20 tokens"
+        );
+    }
+
+    // ===== ADDITIONAL CRITICAL EDGE CASE TESTS =====
+
+    function test_MixedPayments_SameCollection_ETH_And_ERC20() public {
+        // 🎉 NEW FEATURE: Same collection can now have items with different payment methods!
+        // This tests the enhanced shopping cart experience
+        vm.startPrank(admin);
+
+        // Create 3 drops in SAME collection with different payment methods:
+        uint256 tokenId1 = factory.createNewDrop(
+            collection1,
+            0.1 ether, // ETH payment
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId2 = factory.createNewDropWithERC20(
+            collection1, // SAME collection!
+            0, // ethPrice = 0 (ERC20-only)
+            address(mockERC20),
+            100 * 10 ** 18, // ERC20 price
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId3 = factory.createNewDrop(
+            collection1, // SAME collection!
+            0.2 ether, // ETH payment
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        // Shopping cart: 3 items from same collection, mixed payments
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](3);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1 // ETH: 0.1 ether
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId2,
+            amount: 2 // ERC20: 200 tokens
+        });
+        items[2] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId3,
+            amount: 1 // ETH: 0.2 ether
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        // Get payment estimate
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, true);
+
+        // Should require both ETH (0.1 + 0.2 = 0.3) AND ERC20 (200 tokens)
+        assertEq(
+            ethRequired,
+            0.3 ether,
+            "Should require 0.3 ETH for items 1 & 3"
+        );
+        assertEq(
+            erc20Requirements[0].amount,
+            200 * 10 ** 18,
+            "Should require 200 ERC20 for item 2"
+        );
+
+        // Approve ERC20
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 200 * 10 ** 18);
+
+        uint256 userEthBefore = user.balance;
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+
+        // Execute the mixed payment - SAME collection, DIFFERENT payment methods!
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.3 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify all mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId2), 2);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId3), 1);
+
+        // Verify correct payments
+        assertEq(
+            user.balance,
+            userEthBefore - 0.3 ether,
+            "Should have paid 0.3 ETH"
+        );
+        assertEq(
+            mockERC20.balanceOf(user),
+            userErc20Before - 200 * 10 ** 18,
+            "Should have paid 200 ERC20 tokens"
+        );
+    }
+
+    function test_EdgeCase_UserSendsETH_ForERC20OnlyDrop_ShouldRevert() public {
+        // CRITICAL: User sends ETH (preferETH=true) but drop only accepts ERC20
+        // Should revert appropriately, not try to use ETH with ethPrice=0
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection1,
+            0, // No ETH accepted
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        // User mistakenly sends ETH with preferETH=true
+        // Should use ERC20 since ETH is not available (ethPrice=0)
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, true);
+
+        // Even with preferETH=true, should require ERC20 since ethPrice=0
+        assertEq(ethRequired, 0, "Should not require ETH when ethPrice=0");
+        assertEq(
+            erc20Requirements[0].amount,
+            100 * 10 ** 18,
+            "Should require ERC20"
+        );
+
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+
+        // Execute - system should use ERC20 even though user sent ETH
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify ERC20 was used and ETH was refunded
+        assertEq(
+            mockERC20.balanceOf(user),
+            userErc20Before - 100 * 10 ** 18,
+            "Should have paid with ERC20"
+        );
+        assertEq(
+            user.balance,
+            100 ether,
+            "ETH should be refunded since not needed"
+        );
+    }
+
+    function test_EdgeCase_AllZeroEthPrices_MultipleERC20Tokens() public {
+        // CRITICAL: Shopping cart where ALL drops have ethPrice=0
+        // Drop 1: ethPrice=0, accepts mockERC20
+        // Drop 2: ethPrice=0, accepts mockERC20_2
+        // Drop 3: ethPrice=0, accepts mockERC20
+        vm.startPrank(admin);
+        uint256 tokenId1 = factory.createNewDropWithERC20(
+            collection1,
+            0,
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId2 = factory.createNewDropWithERC20(
+            collection2,
+            0,
+            address(mockERC20_2),
+            200 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId3 = factory.createNewDropWithERC20(
+            collection1,
+            0,
+            address(mockERC20),
+            150 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](3);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection2,
+            tokenId: tokenId2,
+            amount: 1
+        });
+        items[2] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId3,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](2);
+        erc20Tokens[0] = address(mockERC20);
+        erc20Tokens[1] = address(mockERC20_2);
+
+        // Get estimate - should show 0 ETH, multiple ERC20 requirements
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, false);
+
+        assertEq(ethRequired, 0, "Should require 0 ETH");
+        // mockERC20: 100 + 150 = 250 tokens
+        // mockERC20_2: 200 tokens
+        assertEq(erc20Requirements[0].amount, 250 * 10 ** 18);
+        assertEq(erc20Requirements[1].amount, 200 * 10 ** 18);
+
+        // Approve and execute
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 250 * 10 ** 18);
+        vm.prank(user);
+        mockERC20_2.approve(address(crossBatchMinter), 200 * 10 ** 18);
+
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+        uint256 userErc20_2Before = mockERC20_2.balanceOf(user);
+
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify all mints succeeded with correct ERC20 payments
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection2).balanceOf(user, tokenId2), 1);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId3), 1);
+        assertEq(mockERC20.balanceOf(user), userErc20Before - 250 * 10 ** 18);
+        assertEq(
+            mockERC20_2.balanceOf(user),
+            userErc20_2Before - 200 * 10 ** 18
+        );
+    }
+
+    function test_EdgeCase_BoundaryValue_1WeiEthPrice_vs_0() public {
+        // CRITICAL: Test the exact boundary - 1 wei should work, 0 should not default to ETH
+        vm.startPrank(admin);
+        uint256 tokenId1Wei = factory.createNewDrop(
+            collection1,
+            1, // 1 wei - smallest non-zero value
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenIdZero = factory.createNewDropWithERC20(
+            collection2,
+            0, // 0 wei
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        // Test 1: 1 wei drop should accept ETH
+        {
+            BlueprintCrossBatchMinter.BatchMintItem[]
+                memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+            items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+                collection: collection1,
+                tokenId: tokenId1Wei,
+                amount: 10 // 10 * 1 wei = 10 wei
+            });
+
+            (uint256 totalPayment, ) = crossBatchMinter.getPaymentEstimate(
+                items
+            );
+
+            assertEq(totalPayment, 10, "Should require 10 wei");
+
+            vm.prank(user);
+            crossBatchMinter.batchMintAcrossCollections{value: 10}(
+                user,
+                items,
+                address(0)
+            );
+
+            assertEq(
+                BlueprintERC1155(collection1).balanceOf(user, tokenId1Wei),
+                10
+            );
+        }
+
+        // Test 2: 0 wei drop should NOT try to use ETH
+        {
+            BlueprintCrossBatchMinter.BatchMintItem[]
+                memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+            items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+                collection: collection2,
+                tokenId: tokenIdZero,
+                amount: 1
+            });
+
+            address[] memory erc20Tokens = new address[](0);
+
+            // Should revert - can't use ETH when ethPrice=0
+            vm.expectRevert(
+                BlueprintCrossBatchMinter
+                    .BlueprintCrossBatchMinter__DropNotActive
+                    .selector
+            );
+            crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, true);
+        }
+    }
+
+    function test_EdgeCase_LargeBatch_MixedZeroAndNonZeroEthPrices() public {
+        // CRITICAL: Large batch with complex mix of ethPrice=0 and non-zero
+        // This tests gas efficiency and correct routing for many items
+        vm.startPrank(admin);
+
+        uint256[] memory tokenIds = new uint256[](10);
+        // Create 10 drops: 5 with ETH, 5 with ERC20-only (ethPrice=0)
+        for (uint256 i = 0; i < 5; i++) {
+            tokenIds[i] = factory.createNewDrop(
+                collection1,
+                (i + 1) * 0.01 ether, // 0.01, 0.02, 0.03, 0.04, 0.05 ETH
+                block.timestamp,
+                block.timestamp + 1 hours,
+                true
+            );
+        }
+        for (uint256 i = 5; i < 10; i++) {
+            tokenIds[i] = factory.createNewDropWithERC20(
+                collection2,
+                0, // ethPrice = 0
+                address(mockERC20),
+                (i - 4) * 10 * 10 ** 18, // 10, 20, 30, 40, 50 tokens
+                block.timestamp,
+                block.timestamp + 1 hours,
+                true
+            );
+        }
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](10);
+        for (uint256 i = 0; i < 10; i++) {
+            items[i] = BlueprintCrossBatchMinter.BatchMintItem({
+                collection: i < 5 ? collection1 : collection2,
+                tokenId: tokenIds[i],
+                amount: 1
+            });
+        }
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, true);
+
+        // ETH: 0.01 + 0.02 + 0.03 + 0.04 + 0.05 = 0.15 ETH
+        assertEq(
+            ethRequired,
+            0.15 ether,
+            "Should require 0.15 ETH for items 0-4"
+        );
+        // ERC20: 10 + 20 + 30 + 40 + 50 = 150 tokens
+        assertEq(
+            erc20Requirements[0].amount,
+            150 * 10 ** 18,
+            "Should require 150 ERC20 for items 5-9"
+        );
+
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 150 * 10 ** 18);
+
+        uint256 userEthBefore = user.balance;
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.15 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify all 10 mints succeeded
+        for (uint256 i = 0; i < 5; i++) {
+            assertEq(
+                BlueprintERC1155(collection1).balanceOf(user, tokenIds[i]),
+                1
+            );
+        }
+        for (uint256 i = 5; i < 10; i++) {
+            assertEq(
+                BlueprintERC1155(collection2).balanceOf(user, tokenIds[i]),
+                1
+            );
+        }
+
+        assertEq(user.balance, userEthBefore - 0.15 ether);
+        assertEq(mockERC20.balanceOf(user), userErc20Before - 150 * 10 ** 18);
+    }
+
+    function test_MixedPayments_SameCollection_MultipleERC20Tokens() public {
+        // CRITICAL: Same collection with items accepting DIFFERENT ERC20 tokens
+        // Tests that grouping creates separate groups for each ERC20 token
+        vm.startPrank(admin);
+
+        uint256 tokenId1 = factory.createNewDropWithERC20(
+            collection1,
+            0, // No ETH
+            address(mockERC20),
+            100 * 10 ** 18, // Accepts mockERC20
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId2 = factory.createNewDropWithERC20(
+            collection1, // SAME collection!
+            0, // No ETH
+            address(mockERC20_2),
+            200 * 10 ** 18, // Accepts mockERC20_2
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 tokenId3 = factory.createNewDropWithERC20(
+            collection1, // SAME collection!
+            0,
+            address(mockERC20),
+            150 * 10 ** 18, // Also accepts mockERC20
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](3);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId1,
+            amount: 1 // mockERC20: 100
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId2,
+            amount: 1 // mockERC20_2: 200
+        });
+        items[2] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId3,
+            amount: 2 // mockERC20: 300 (2 * 150)
+        });
+
+        address[] memory erc20Tokens = new address[](2);
+        erc20Tokens[0] = address(mockERC20);
+        erc20Tokens[1] = address(mockERC20_2);
+
+        // Should create 2 groups: (collection1, mockERC20) and (collection1, mockERC20_2)
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, false);
+
+        assertEq(ethRequired, 0, "Should not require ETH");
+        // mockERC20: 100 + 300 = 400 tokens
+        assertEq(erc20Requirements[0].amount, 400 * 10 ** 18);
+        // mockERC20_2: 200 tokens
+        assertEq(erc20Requirements[1].amount, 200 * 10 ** 18);
+
+        // Approve both tokens
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 400 * 10 ** 18);
+        vm.prank(user);
+        mockERC20_2.approve(address(crossBatchMinter), 200 * 10 ** 18);
+
+        uint256 userErc20Before = mockERC20.balanceOf(user);
+        uint256 userErc20_2Before = mockERC20_2.balanceOf(user);
+
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Verify all mints succeeded
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId1), 1);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId2), 1);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId3), 2);
+
+        // Verify correct token deductions
+        assertEq(mockERC20.balanceOf(user), userErc20Before - 400 * 10 ** 18);
+        assertEq(
+            mockERC20_2.balanceOf(user),
+            userErc20_2Before - 200 * 10 ** 18
+        );
+    }
+
+    function test_MixedPayments_ItemOrderDoesNotMatter() public {
+        // CRITICAL: Verify that item order doesn't affect grouping/payments
+        vm.startPrank(admin);
+
+        uint256 ethToken = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 erc20Token = factory.createNewDropWithERC20(
+            collection1,
+            0,
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        // Test with different orderings
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items1 = new BlueprintCrossBatchMinter.BatchMintItem[](4);
+        items1[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethToken,
+            amount: 1
+        });
+        items1[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: erc20Token,
+            amount: 1
+        });
+        items1[2] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethToken,
+            amount: 1
+        });
+        items1[3] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: erc20Token,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        (
+            uint256 eth1,
+            BlueprintCrossBatchMinter.ERC20Requirement[] memory erc1
+        ) = crossBatchMinter.getMixedPaymentEstimate(items1, erc20Tokens, true);
+
+        // Different order
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items2 = new BlueprintCrossBatchMinter.BatchMintItem[](4);
+        items2[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: erc20Token,
+            amount: 1
+        });
+        items2[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: erc20Token,
+            amount: 1
+        });
+        items2[2] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethToken,
+            amount: 1
+        });
+        items2[3] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethToken,
+            amount: 1
+        });
+
+        (
+            uint256 eth2,
+            BlueprintCrossBatchMinter.ERC20Requirement[] memory erc2
+        ) = crossBatchMinter.getMixedPaymentEstimate(items2, erc20Tokens, true);
+
+        // Totals should be identical regardless of order
+        assertEq(eth1, eth2, "ETH total should be same");
+        assertEq(eth1, 0.2 ether, "Should require 0.2 ETH");
+        assertEq(erc1[0].amount, erc2[0].amount, "ERC20 total should be same");
+        assertEq(erc1[0].amount, 200 * 10 ** 18, "Should require 200 ERC20");
+    }
+
+    function test_MixedPayments_LargeNumberOfGroups() public {
+        // CRITICAL: Test with maximum number of unique groups
+        // This stresses the grouping logic and gas costs
+        vm.startPrank(admin);
+
+        uint256[] memory tokenIds = new uint256[](6);
+
+        // Create 3 ETH drops and 3 ERC20 drops in same collection
+        // This creates 2 groups
+        for (uint256 i = 0; i < 3; i++) {
+            tokenIds[i] = factory.createNewDrop(
+                collection1,
+                (i + 1) * 0.01 ether,
+                block.timestamp,
+                block.timestamp + 1 hours,
+                true
+            );
+        }
+
+        for (uint256 i = 3; i < 6; i++) {
+            tokenIds[i] = factory.createNewDropWithERC20(
+                collection1,
+                0,
+                address(mockERC20),
+                (i - 2) * 50 * 10 ** 18,
+                block.timestamp,
+                block.timestamp + 1 hours,
+                true
+            );
+        }
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](6);
+
+        for (uint256 i = 0; i < 6; i++) {
+            items[i] = BlueprintCrossBatchMinter.BatchMintItem({
+                collection: collection1,
+                tokenId: tokenIds[i],
+                amount: 1
+            });
+        }
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(items, erc20Tokens, true);
+
+        // ETH: 0.01 + 0.02 + 0.03 = 0.06
+        assertEq(ethRequired, 0.06 ether);
+        // ERC20: 50 + 100 + 150 = 300
+        assertEq(erc20Requirements[0].amount, 300 * 10 ** 18);
+
+        // Execute and verify
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 300 * 10 ** 18);
+
+        uint256 gasStart = gasleft();
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.06 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+        uint256 gasUsed = gasStart - gasleft();
+
+        // Verify gas is reasonable (less than block gas limit)
+        assertTrue(
+            gasUsed < 30_000_000,
+            "Gas should be reasonable for 6 items in 2 groups"
+        );
+
+        // Verify all mints
+        for (uint256 i = 0; i < 6; i++) {
+            assertEq(
+                BlueprintERC1155(collection1).balanceOf(user, tokenIds[i]),
+                1
+            );
+        }
+    }
+
+    function test_MixedPayments_RefundExcessETH() public {
+        // CRITICAL: Ensure excess ETH is refunded when using mixed payments
+        vm.startPrank(admin);
+
+        uint256 ethToken = factory.createNewDrop(
+            collection1,
+            0.1 ether,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+
+        uint256 erc20Token = factory.createNewDropWithERC20(
+            collection1,
+            0,
+            address(mockERC20),
+            100 * 10 ** 18,
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](2);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: ethToken,
+            amount: 1
+        });
+        items[1] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: erc20Token,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20);
+
+        vm.prank(user);
+        mockERC20.approve(address(crossBatchMinter), 100 * 10 ** 18);
+
+        uint256 userEthBefore = user.balance;
+        uint256 excessPayment = 1 ether; // Much more than needed
+
+        // Send excess ETH
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: excessPayment}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        // Should only pay required 0.1 ETH, rest refunded
+        assertEq(
+            user.balance,
+            userEthBefore - 0.1 ether,
+            "Should refund excess ETH"
+        );
+
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, ethToken), 1);
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, erc20Token), 1);
+    }
+
+    function test_EdgeCase_PreferERC20_ButOnlyETHAvailable_ZeroERC20Price()
+        public
+    {
+        // CRITICAL: User prefers ERC20 (msg.value=0, preferETH=false)
+        // But drop only accepts ETH (has no ERC20 price configured)
+        // Should use ETH anyway since it's the only option
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDrop(
+            collection1,
+            0.1 ether, // Only ETH, no ERC20 configured
+            block.timestamp,
+            block.timestamp + 1 hours,
+            true
+        );
+        vm.stopPrank();
+
+        BlueprintCrossBatchMinter.BatchMintItem[]
+            memory items = new BlueprintCrossBatchMinter.BatchMintItem[](1);
+        items[0] = BlueprintCrossBatchMinter.BatchMintItem({
+            collection: collection1,
+            tokenId: tokenId,
+            amount: 1
+        });
+
+        address[] memory erc20Tokens = new address[](1);
+        erc20Tokens[0] = address(mockERC20); // User provides ERC20 token but drop doesn't accept it
+
+        (
+            uint256 ethRequired,
+            BlueprintCrossBatchMinter.ERC20Requirement[]
+                memory erc20Requirements
+        ) = crossBatchMinter.getMixedPaymentEstimate(
+                items,
+                erc20Tokens,
+                false // User prefers ERC20
+            );
+
+        // Should fall back to ETH since no ERC20 price configured
+        assertEq(ethRequired, 0.1 ether, "Should require ETH");
+        assertEq(erc20Requirements[0].amount, 0, "Should not require ERC20");
+
+        uint256 userEthBefore = user.balance;
+
+        vm.prank(user);
+        crossBatchMinter.batchMintAcrossCollectionsMixed{value: 0.1 ether}(
+            user,
+            items,
+            erc20Tokens,
+            address(0)
+        );
+
+        assertEq(BlueprintERC1155(collection1).balanceOf(user, tokenId), 1);
+        assertEq(user.balance, userEthBefore - 0.1 ether);
+    }
 }

@@ -669,8 +669,9 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Determine payment method for this drop (ETH is always enabled)
-            bool canUseETH = ethPrice >= 0; // Always true since ETH is always enabled
+            // Determine payment method for this drop
+            // ETH is only available if ethPrice > 0
+            bool canUseETH = ethPrice > 0;
 
             // NEW: Find accepted ERC20 price from mapping
             uint256 currentErc20Price = 0;
@@ -702,11 +703,11 @@ contract BlueprintCrossBatchMinter is
                 shouldUseETH = false;
             } else {
                 // Neither available - check if user provided ERC20 tokens but they don't match
-                if (erc20Tokens.length > 0 && !canUseETH) {
+                if (erc20Tokens.length > 0) {
                     // User provided ERC20 tokens but none match this drop's configured tokens
                     revert BlueprintCrossBatchMinter__InvalidERC20Address();
                 }
-                // No valid payment method
+                // No valid payment method (ethPrice = 0 and no ERC20 configured)
                 revert BlueprintCrossBatchMinter__DropNotActive();
             }
 
@@ -734,7 +735,8 @@ contract BlueprintCrossBatchMinter is
     }
 
     /**
-     * @dev Groups items by collection for mixed payment processing
+     * @dev Groups items by (collection, paymentMethod) for mixed payment processing
+     * @notice Now supports mixing ETH and ERC20 items from the same collection!
      * @param items Array of mint items
      * @param erc20Tokens Array of ERC20 tokens to check for pricing
      * @param preferETH If true, prefer ETH for drops that accept both; if false, prefer ERC20
@@ -745,108 +747,202 @@ contract BlueprintCrossBatchMinter is
         address[] calldata erc20Tokens,
         bool preferETH
     ) internal view returns (MixedCollectionData[] memory) {
-        // Count unique collections
-        address[] memory uniqueCollections = new address[](items.length);
-        uint256 uniqueCount = 0;
+        // First pass: determine payment method for each item and count unique groups
+        // Use helper function to avoid stack depth
+        return _buildCollectionGroups(items, erc20Tokens, preferETH);
+    }
+
+    /**
+     * @dev Helper function to build collection groups - avoids stack depth issues
+     */
+    function _buildCollectionGroups(
+        BatchMintItem[] calldata items,
+        address[] calldata erc20Tokens,
+        bool preferETH
+    ) internal view returns (MixedCollectionData[] memory) {
+        // Determine payment method for each item
+        address[] memory itemPaymentTokens = new address[](items.length);
+
+        for (uint256 i = 0; i < items.length; i++) {
+            itemPaymentTokens[i] = _determinePaymentMethod(
+                items[i],
+                erc20Tokens,
+                preferETH
+            );
+        }
+
+        // Count unique (collection, paymentToken) pairs
+        uint256 groupCount = _countUniqueGroups(items, itemPaymentTokens);
+
+        // Build groups
+        return _populateGroups(items, itemPaymentTokens, groupCount);
+    }
+
+    /**
+     * @dev Determines payment method for a single item
+     * @return Payment token address (address(0) for ETH)
+     */
+    function _determinePaymentMethod(
+        BatchMintItem calldata item,
+        address[] calldata erc20Tokens,
+        bool preferETH
+    ) internal view returns (address) {
+        BlueprintERC1155 collection = BlueprintERC1155(item.collection);
+        (uint256 ethPrice, , , ) = collection.drops(item.tokenId);
+
+        // Check if ETH is available
+        bool canUseETH = ethPrice > 0;
+
+        // Check for ERC20
+        address erc20Token = address(0);
+        {
+            // Scope to avoid stack depth
+            for (uint256 k = 0; k < erc20Tokens.length; k++) {
+                uint256 price = collection.erc20Prices(
+                    item.tokenId,
+                    erc20Tokens[k]
+                );
+                if (price > 0) {
+                    erc20Token = erc20Tokens[k];
+                    break;
+                }
+            }
+        }
+
+        bool canUseERC20 = erc20Token != address(0);
+
+        // Determine payment method based on preference
+        if (canUseETH && canUseERC20) {
+            return preferETH ? address(0) : erc20Token;
+        } else if (canUseETH) {
+            return address(0);
+        } else if (canUseERC20) {
+            return erc20Token;
+        } else {
+            if (erc20Tokens.length > 0) {
+                revert BlueprintCrossBatchMinter__InvalidERC20Address();
+            }
+            revert BlueprintCrossBatchMinter__DropNotActive();
+        }
+    }
+
+    /**
+     * @dev Counts unique (collection, paymentToken) pairs
+     */
+    function _countUniqueGroups(
+        BatchMintItem[] calldata items,
+        address[] memory itemPaymentTokens
+    ) internal pure returns (uint256) {
+        uint256 count = 0;
 
         for (uint256 i = 0; i < items.length; i++) {
             bool found = false;
-            for (uint256 j = 0; j < uniqueCount; j++) {
-                if (uniqueCollections[j] == items[i].collection) {
+            for (uint256 j = 0; j < i; j++) {
+                if (
+                    items[i].collection == items[j].collection &&
+                    itemPaymentTokens[i] == itemPaymentTokens[j]
+                ) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                uniqueCollections[uniqueCount] = items[i].collection;
-                uniqueCount++;
+                count++;
             }
         }
 
-        // Create collection data array
-        MixedCollectionData[] memory collectionData = new MixedCollectionData[](
-            uniqueCount
+        return count;
+    }
+
+    /**
+     * @dev Populates the collection groups with item data
+     */
+    function _populateGroups(
+        BatchMintItem[] calldata items,
+        address[] memory itemPaymentTokens,
+        uint256 groupCount
+    ) internal view returns (MixedCollectionData[] memory) {
+        MixedCollectionData[] memory groups = new MixedCollectionData[](
+            groupCount
         );
+        uint256 currentGroup = 0;
 
-        // Group items by collection
-        for (uint256 i = 0; i < uniqueCount; i++) {
-            address collection = uniqueCollections[i];
+        for (uint256 i = 0; i < items.length; i++) {
+            // Check if this group already exists
+            bool exists = false;
+            uint256 groupIndex = 0;
 
-            // Count items for this collection
+            for (uint256 g = 0; g < currentGroup; g++) {
+                if (
+                    groups[g].collection == items[i].collection &&
+                    groups[g].erc20Token == itemPaymentTokens[i]
+                ) {
+                    exists = true;
+                    groupIndex = g;
+                    break;
+                }
+            }
+
+            if (!exists) {
+                // Create new group
+                groupIndex = currentGroup;
+                groups[groupIndex].collection = items[i].collection;
+                groups[groupIndex].erc20Token = itemPaymentTokens[i];
+                currentGroup++;
+            }
+        }
+
+        // Second pass: count items per group and allocate arrays
+        for (uint256 g = 0; g < groupCount; g++) {
             uint256 itemCount = 0;
-            for (uint256 j = 0; j < items.length; j++) {
-                if (items[j].collection == collection) {
+            for (uint256 i = 0; i < items.length; i++) {
+                if (
+                    items[i].collection == groups[g].collection &&
+                    itemPaymentTokens[i] == groups[g].erc20Token
+                ) {
                     itemCount++;
                 }
             }
 
-            // Create arrays for this collection
-            uint256[] memory tokenIds = new uint256[](itemCount);
-            uint256[] memory amounts = new uint256[](itemCount);
-            uint256 ethPayment = 0;
-            uint256 erc20Payment = 0;
-            address erc20Token = address(0);
-
-            // Fill arrays and determine payment method
-            uint256 currentIndex = 0;
-            for (uint256 j = 0; j < items.length; j++) {
-                if (items[j].collection == collection) {
-                    tokenIds[currentIndex] = items[j].tokenId;
-                    amounts[currentIndex] = items[j].amount;
-
-                    // Get ETH price (ETH always enabled)
-                    BlueprintERC1155 ctr = BlueprintERC1155(collection);
-                    (uint256 ethPrice, , , ) = ctr.drops(items[j].tokenId);
-
-                    // Use ETH if: (preferred AND ethPrice > 0) OR no ERC20 specified
-                    if (
-                        (preferETH && ethPrice > 0) || erc20Tokens.length == 0
-                    ) {
-                        ethPayment += ethPrice * items[j].amount;
-                    } else {
-                        // Try to use ERC20
-                        uint256 foundPrice = 0;
-                        address foundToken = address(0);
-                        for (
-                            uint256 k = 0;
-                            k < erc20Tokens.length && foundPrice == 0;
-                            k++
-                        ) {
-                            foundPrice = ctr.erc20Prices(
-                                items[j].tokenId,
-                                erc20Tokens[k]
-                            );
-                            if (foundPrice > 0) {
-                                foundToken = erc20Tokens[k];
-                            }
-                        }
-                        // Use ERC20 if found, otherwise fallback to ETH (if price > 0)
-                        if (foundPrice > 0) {
-                            erc20Payment += foundPrice * items[j].amount;
-                            erc20Token = foundToken;
-                        } else if (ethPrice > 0) {
-                            ethPayment += ethPrice * items[j].amount;
-                        } else {
-                            // No payment method available (ethPrice = 0 and no matching ERC20)
-                            revert BlueprintCrossBatchMinter__InvalidERC20Address();
-                        }
-                    }
-
-                    currentIndex++;
-                }
-            }
-
-            collectionData[i] = MixedCollectionData({
-                collection: collection,
-                tokenIds: tokenIds,
-                amounts: amounts,
-                ethPayment: ethPayment,
-                erc20Token: erc20Token,
-                erc20Payment: erc20Payment
-            });
+            groups[g].tokenIds = new uint256[](itemCount);
+            groups[g].amounts = new uint256[](itemCount);
         }
 
-        return collectionData;
+        // Third pass: fill arrays and calculate payments
+        for (uint256 g = 0; g < groupCount; g++) {
+            uint256 idx = 0;
+            for (uint256 i = 0; i < items.length; i++) {
+                if (
+                    items[i].collection == groups[g].collection &&
+                    itemPaymentTokens[i] == groups[g].erc20Token
+                ) {
+                    groups[g].tokenIds[idx] = items[i].tokenId;
+                    groups[g].amounts[idx] = items[i].amount;
+
+                    // Calculate payment
+                    BlueprintERC1155 ctr = BlueprintERC1155(
+                        items[i].collection
+                    );
+
+                    if (groups[g].erc20Token == address(0)) {
+                        // ETH payment
+                        (uint256 ethPrice, , , ) = ctr.drops(items[i].tokenId);
+                        groups[g].ethPayment += ethPrice * items[i].amount;
+                    } else {
+                        // ERC20 payment
+                        uint256 price = ctr.erc20Prices(
+                            items[i].tokenId,
+                            groups[g].erc20Token
+                        );
+                        groups[g].erc20Payment += price * items[i].amount;
+                    }
+
+                    idx++;
+                }
+            }
+        }
+
+        return groups;
     }
 
     /**
