@@ -123,6 +123,9 @@ contract BlueprintERC1155 is
     uint256 public protocolFeeETH; // Protocol fee in wei for free ETH mints (default: 111000000000000 = 0.000111 ETH)
     mapping(address => uint256) public protocolFeeERC20; // Protocol fee per ERC20 token for free mints (e.g., USDC: 300000 = $0.30)
 
+    // Track which ERC20 tokens are explicitly enabled for each token ID (allows truly free mints when price = 0 and protocolFee = 0)
+    mapping(uint256 => mapping(address => bool)) public isERC20Enabled;
+
     event DropCreated(
         uint256 indexed tokenId,
         uint256 price,
@@ -446,6 +449,7 @@ contract BlueprintERC1155 is
         // Set ERC20 price if token provided (allows 0 for free mints with protocol fee)
         if (erc20Token != address(0)) {
             erc20Prices[tokenId][erc20Token] = erc20Price;
+            isERC20Enabled[tokenId][erc20Token] = true;
             emit ERC20PriceSet(tokenId, erc20Token, erc20Price);
         }
 
@@ -526,6 +530,7 @@ contract BlueprintERC1155 is
         // Set ERC20 price if token provided (allows 0 for free mints with protocol fee)
         if (erc20Token != address(0)) {
             erc20Prices[tokenId][erc20Token] = erc20Price;
+            isERC20Enabled[tokenId][erc20Token] = true;
             emit ERC20PriceSet(tokenId, erc20Token, erc20Price);
         }
 
@@ -536,7 +541,7 @@ contract BlueprintERC1155 is
      * @dev Sets or updates ERC20 price for a specific token - only callable by factory
      * @param tokenId Token ID to configure
      * @param erc20Token ERC20 token address
-     * @param price Price in ERC20 token units (0 to disable)
+     * @param price Price in ERC20 token units (0 = free mint, no protocol fee unless protocolFeeERC20 is set)
      */
     function setERC20Price(
         uint256 tokenId,
@@ -547,7 +552,25 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__InvalidERC20Address();
         }
         erc20Prices[tokenId][erc20Token] = price;
+        isERC20Enabled[tokenId][erc20Token] = true;
         emit ERC20PriceSet(tokenId, erc20Token, price);
+    }
+
+    /**
+     * @dev Disables ERC20 token for a specific token ID - only callable by factory
+     * @param tokenId Token ID to configure
+     * @param erc20Token ERC20 token address to disable
+     */
+    function disableERC20(
+        uint256 tokenId,
+        address erc20Token
+    ) external onlyRole(FACTORY_ROLE) {
+        if (erc20Token == address(0)) {
+            revert BlueprintERC1155__InvalidERC20Address();
+        }
+        erc20Prices[tokenId][erc20Token] = 0;
+        isERC20Enabled[tokenId][erc20Token] = false;
+        emit ERC20PriceSet(tokenId, erc20Token, 0);
     }
 
     /**
@@ -940,8 +963,8 @@ contract BlueprintERC1155 is
         uint256 erc20Price = erc20Prices[tokenId][erc20TokenAddress];
         uint256 protocolFee = protocolFeeERC20[erc20TokenAddress];
 
-        // Check if ERC20 is enabled: either has a price OR has a protocol fee configured
-        if (erc20Price == 0 && protocolFee == 0) {
+        // Check if ERC20 is explicitly enabled for this token
+        if (!isERC20Enabled[tokenId][erc20TokenAddress]) {
             revert BlueprintERC1155__ERC20NotEnabled();
         }
 
@@ -1243,8 +1266,8 @@ contract BlueprintERC1155 is
 
             uint256 erc20Price = erc20Prices[tokenIds[i]][erc20TokenAddress];
             
-            // Check if ERC20 is enabled: either has a price OR has a protocol fee configured
-            if (erc20Price == 0 && protocolFee == 0) {
+            // Check if ERC20 is explicitly enabled for this token
+            if (!isERC20Enabled[tokenIds[i]][erc20TokenAddress]) {
                 revert BlueprintERC1155__ERC20NotEnabled();
             }
 
@@ -1391,8 +1414,8 @@ contract BlueprintERC1155 is
         uint256 erc20Price = erc20Prices[tokenId][erc20TokenAddress];
         uint256 protocolFee = protocolFeeERC20[erc20TokenAddress];
 
-        // Check if ERC20 is enabled: either has a price OR has a protocol fee configured
-        if (erc20Price == 0 && protocolFee == 0) {
+        // Check if ERC20 is explicitly enabled for this token
+        if (!isERC20Enabled[tokenId][erc20TokenAddress]) {
             revert BlueprintERC1155__ERC20NotEnabled();
         }
 

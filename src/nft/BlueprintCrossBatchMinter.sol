@@ -443,8 +443,20 @@ contract BlueprintCrossBatchMinter is
             }
 
             // Calculate ETH payment
-            info.totalETHRequired += ethPrice * item.amount;
-            info.hasETHPayments = true;
+            // Only count as ETH payment if ethPrice > 0
+            if (ethPrice > 0) {
+                info.totalETHRequired += ethPrice * item.amount;
+                info.hasETHPayments = true;
+            } else {
+                // ethPrice == 0 indicates this might be an ERC20-only drop
+                // Flag as ERC20 payment to detect mixed payment scenarios
+                info.hasERC20Payments = true;
+            }
+        }
+
+        // Check if we have mixed payment methods
+        if (info.hasETHPayments && info.hasERC20Payments) {
+            info.mixedPaymentMethods = true;
         }
 
         return info;

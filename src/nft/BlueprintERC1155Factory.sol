@@ -511,6 +511,26 @@ contract BlueprintERC1155Factory is
     }
 
     /**
+     * @dev Disables ERC20 token for a specific drop
+     * @param collection Address of the collection
+     * @param tokenId Token ID to disable ERC20 for
+     * @param erc20Token ERC20 token address to disable
+     */
+    function disableERC20(
+        address collection,
+        uint256 tokenId,
+        address erc20Token
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!isDeployedCollection[collection]) {
+            revert BlueprintERC1155Factory__NotDeployedCollection(collection);
+        }
+
+        BlueprintERC1155(collection).disableERC20(tokenId, erc20Token);
+
+        emit CollectionUpdated(collection, "disableERC20");
+    }
+
+    /**
      * @dev Sets the protocol fee for free ETH mints on a collection
      * @param collection Address of the collection
      * @param protocolFeeETH Protocol fee in wei (e.g., 111000000000000 = 0.000111 ETH)

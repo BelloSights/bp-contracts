@@ -1126,13 +1126,11 @@ contract BlueprintERC1155FactoryTest is Test {
     function test_RevertWhen_ERC20NotEnabled() public {
         test_CreateCollection();
 
-        // Create drop with ERC20 disabled (price = 0)
+        // Create drop WITHOUT ERC20 support (only ETH enabled)
         vm.startPrank(admin);
-        uint256 tokenId = factory.createNewDropWithERC20(
+        uint256 tokenId = factory.createNewDrop(
             collection,
             1 ether,
-            address(mockERC20),
-            0, // ERC20 disabled (price = 0)
             block.timestamp + 1 days,
             block.timestamp + 30 days,
             true // active
@@ -1142,7 +1140,7 @@ contract BlueprintERC1155FactoryTest is Test {
         // Fast forward to after start time
         vm.warp(block.timestamp + 2 days);
 
-        // Try to mint with ERC20
+        // Try to mint with ERC20 that was never configured
         vm.startPrank(user1);
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
@@ -1183,6 +1181,73 @@ contract BlueprintERC1155FactoryTest is Test {
         );
         collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
 
+        vm.stopPrank();
+    }
+
+    function test_TrulyFreeERC20Mint() public {
+        test_CreateCollection();
+
+        // Create drop with truly free ERC20 mint (price = 0, no protocol fee)
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection,
+            1 ether, // ETH price
+            address(mockERC20),
+            0, // ERC20 price = 0 (free)
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true // active
+        );
+        vm.stopPrank();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Mint with truly free ERC20 (no payment required)
+        vm.startPrank(user1);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        uint256 balanceBefore = collectionContract.balanceOf(user1, tokenId);
+        
+        // No approval or balance needed for free mint
+        collectionContract.mintWithERC20(user1, tokenId, 5, address(mockERC20));
+
+        uint256 balanceAfter = collectionContract.balanceOf(user1, tokenId);
+        assertEq(balanceAfter, balanceBefore + 5, "Should mint 5 tokens for free");
+
+        vm.stopPrank();
+    }
+
+    function test_DisableERC20() public {
+        test_CreateDropWithERC20();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Verify ERC20 is enabled
+        vm.startPrank(user1);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        mockERC20.approve(collection, 100 * 10 ** 18);
+        
+        // Should work before disabling
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
+        vm.stopPrank();
+
+        // Disable ERC20
+        vm.startPrank(admin);
+        factory.disableERC20(collection, 0, address(mockERC20));
+        vm.stopPrank();
+
+        // Try to mint after disabling - should revert
+        vm.startPrank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BlueprintERC1155.BlueprintERC1155__ERC20NotEnabled.selector
+            )
+        );
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
         vm.stopPrank();
     }
 
