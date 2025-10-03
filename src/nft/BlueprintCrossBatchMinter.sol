@@ -83,7 +83,6 @@ contract BlueprintCrossBatchMinter is
     error BlueprintCrossBatchMinter__ETHNotEnabled();
     error BlueprintCrossBatchMinter__ERC20NotEnabled();
     error BlueprintCrossBatchMinter__InvalidERC20Address();
-    error BlueprintCrossBatchMinter__FunctionNotSupported(bytes4 selector);
 
     // ===== ROLES =====
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
@@ -311,7 +310,7 @@ contract BlueprintCrossBatchMinter is
             preferETH
         );
 
-        // Validate ETH payment
+        // Validate ETH payment (also catches case where user sent no ETH but it's required)
         if (msg.value < paymentInfo.totalETHRequired) {
             revert BlueprintCrossBatchMinter__InsufficientPayment(
                 paymentInfo.totalETHRequired,
@@ -673,7 +672,8 @@ contract BlueprintCrossBatchMinter is
             // ETH is only available if ethPrice > 0
             bool canUseETH = ethPrice > 0;
 
-            // NEW: Find accepted ERC20 price from mapping
+            // Find accepted ERC20 price from mapping
+            // Use deterministic selection (lowest address) to avoid order-dependency
             uint256 currentErc20Price = 0;
             address currentErc20Token = address(0);
             for (uint256 k = 0; k < erc20Tokens.length; k++) {
@@ -682,15 +682,20 @@ contract BlueprintCrossBatchMinter is
                     erc20Tokens[k]
                 );
                 if (priceFromMapping > 0) {
-                    currentErc20Price = priceFromMapping;
-                    currentErc20Token = erc20Tokens[k];
-                    break; // Use the first matching ERC20 token
+                    // Use the token with the lowest address for deterministic selection
+                    if (
+                        currentErc20Token == address(0) ||
+                        erc20Tokens[k] < currentErc20Token
+                    ) {
+                        currentErc20Price = priceFromMapping;
+                        currentErc20Token = erc20Tokens[k];
+                    }
                 }
             }
             bool canUseERC20 = currentErc20Token != address(0) &&
                 currentErc20Price > 0;
 
-            // Respect user's payment preference
+            // Determine payment method based on availability and user preference
             bool shouldUseETH;
             if (canUseETH && canUseERC20) {
                 // Both available - use user's preference
@@ -793,7 +798,7 @@ contract BlueprintCrossBatchMinter is
         // Check if ETH is available
         bool canUseETH = ethPrice > 0;
 
-        // Check for ERC20
+        // Check for ERC20 with deterministic selection (lowest address)
         address erc20Token = address(0);
         {
             // Scope to avoid stack depth
@@ -803,8 +808,12 @@ contract BlueprintCrossBatchMinter is
                     erc20Tokens[k]
                 );
                 if (price > 0) {
-                    erc20Token = erc20Tokens[k];
-                    break;
+                    // Use the token with the lowest address for deterministic selection
+                    if (
+                        erc20Token == address(0) || erc20Tokens[k] < erc20Token
+                    ) {
+                        erc20Token = erc20Tokens[k];
+                    }
                 }
             }
         }
@@ -980,40 +989,15 @@ contract BlueprintCrossBatchMinter is
                 // Approve the collection to spend tokens
                 token.forceApprove(data.collection, data.erc20Payment);
 
-                // Try batch ERC20 mint with referrer (new signature for v2+ collections)
-                try
-                    collection.batchMintWithERC20(
-                        to,
-                        data.tokenIds,
-                        data.amounts,
-                        data.erc20Token,
-                        referrer
-                    )
-                {
-                    // success with referrer
-                } catch {
-                    // Fall back to old signature (v1 collections without referrer support)
-                    try
-                        collection.batchMintWithERC20(
-                            to,
-                            data.tokenIds,
-                            data.amounts,
-                            data.erc20Token
-                        )
-                    {
-                        // success without referrer
-                    } catch {
-                        // Both attempts failed - reset approval and revert
-                        token.forceApprove(data.collection, 0);
-                        revert BlueprintCrossBatchMinter__FunctionNotSupported(
-                            bytes4(
-                                keccak256(
-                                    "batchMintWithERC20(address,uint256[],uint256[],address)"
-                                )
-                            )
-                        );
-                    }
-                }
+                // Call batch ERC20 mint with referrer
+                // Let any errors (insufficient funds, access control, etc.) bubble up naturally
+                collection.batchMintWithERC20(
+                    to,
+                    data.tokenIds,
+                    data.amounts,
+                    data.erc20Token,
+                    referrer
+                );
 
                 // Reset approval for security
                 token.forceApprove(data.collection, 0);
