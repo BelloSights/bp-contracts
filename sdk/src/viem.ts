@@ -21,7 +21,7 @@ import {
   WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { blueprintERC1155FactoryAbi, rewardPoolFactoryAbi } from "../abis";
+import { blueprintERC1155FactoryAbi, creatorRewardPoolFactoryAbi, rewardPoolFactoryAbi } from "../abis";
 
 dotenv.config({
   path: path.resolve(__dirname, "../../.env"),
@@ -208,25 +208,32 @@ export const getViemConfigFromChainId = (chainId: number): Chain => {
 export const getContractAddresses = (chainId: number) => {
   let dropFactoryProxyAddress: `0x${string}`;
   let rewardPoolFactoryAddress: `0x${string}`;
+  let creatorRewardPoolFactoryAddress: `0x${string}`;
 
   switch (chainId) {
     case 8453: // Base Mainnet
       dropFactoryProxyAddress = process.env
         .BASE_ERC1155_FACTORY_PROXY_ADDRESS as `0x${string}`;
       rewardPoolFactoryAddress = process.env
-        .BASE_REWARD_POOL_FACTORY_ADDRESS as `0x${string}`;
+        .BASE_REWARD_POOL_FACTORY_PROXY_ADDRESS as `0x${string}`;
+      creatorRewardPoolFactoryAddress = process.env
+        .BASE_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS as `0x${string}`;
       break;
     case 84532: // Base Sepolia
       dropFactoryProxyAddress = process.env
         .BASE_SEPOLIA_ERC1155_FACTORY_PROXY_ADDRESS as `0x${string}`;
       rewardPoolFactoryAddress = process.env
-        .BASE_SEPOLIA_REWARD_POOL_FACTORY_ADDRESS as `0x${string}`;
+        .BASE_SEPOLIA_REWARD_POOL_FACTORY_PROXY_ADDRESS as `0x${string}`;
+      creatorRewardPoolFactoryAddress = process.env
+        .BASE_SEPOLIA_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS as `0x${string}`;
       break;
     case 543210: // Zero Network
       dropFactoryProxyAddress = process.env
         .ZERO_ERC1155_FACTORY_PROXY_ADDRESS as `0x${string}`;
       rewardPoolFactoryAddress = process.env
         .ZERO_REWARD_POOL_FACTORY_ADDRESS as `0x${string}`;
+      creatorRewardPoolFactoryAddress = process.env
+        .ZERO_CREATOR_REWARD_POOL_FACTORY_ADDRESS as `0x${string}`;
       break;
     default:
       throw new Error(
@@ -235,26 +242,35 @@ export const getContractAddresses = (chainId: number) => {
   }
 
   if (!dropFactoryProxyAddress) {
-    throw new Error(
-      `ERC1155_FACTORY_PROXY_ADDRESS for chain ID ${chainId} is not set`
-    );
+    const varName = chainId === 8453 ? 'BASE_ERC1155_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_ERC1155_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_ERC1155_FACTORY_PROXY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
   }
   if (!rewardPoolFactoryAddress) {
-    throw new Error(
-      `REWARD_POOL_FACTORY_ADDRESS for chain ID ${chainId} is not set`
-    );
+    const varName = chainId === 8453 ? 'BASE_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_REWARD_POOL_FACTORY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
+  }
+  if (!creatorRewardPoolFactoryAddress) {
+    const varName = chainId === 8453 ? 'BASE_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    chainId === 84532 ? 'BASE_SEPOLIA_CREATOR_REWARD_POOL_FACTORY_PROXY_ADDRESS' : 
+                    'ZERO_CREATOR_REWARD_POOL_FACTORY_ADDRESS';
+    throw new Error(`${varName} for chain ID ${chainId} is not set`);
   }
 
   return {
     dropFactoryProxyAddress,
     rewardPoolFactoryAddress,
+    creatorRewardPoolFactoryAddress,
   };
 };
 
 // Function to create contract instances for any chain ID
 export const getContractsForChain = (chainId: number) => {
   const chain = getViemConfigFromChainId(chainId);
-  const { dropFactoryProxyAddress, rewardPoolFactoryAddress } =
+  const { dropFactoryProxyAddress, rewardPoolFactoryAddress, creatorRewardPoolFactoryAddress } =
     getContractAddresses(chainId);
 
   return {
@@ -266,6 +282,11 @@ export const getContractsForChain = (chainId: number) => {
     rewardPoolFactoryContract: {
       address: rewardPoolFactoryAddress,
       abi: rewardPoolFactoryAbi,
+      chain,
+    },
+    creatorRewardPoolFactoryContract: {
+      address: creatorRewardPoolFactoryAddress,
+      abi: creatorRewardPoolFactoryAbi,
       chain,
     },
   };

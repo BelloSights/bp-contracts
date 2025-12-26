@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import "../../src/nft/BlueprintERC1155Factory.sol";
 import "../../src/nft/BlueprintERC1155.sol";
 import "@openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -173,13 +174,9 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
         (
             uint256 price,
-            uint256 erc20Price,
-            address acceptedERC20,
             uint256 dropsStartTime,
             uint256 dropsEndTime,
-            bool active,
-            bool ethEnabled,
-            bool erc20Enabled
+            bool active
         ) = collectionContract.drops(dropId);
 
         assertEq(price, defaultMintFee);
@@ -976,37 +973,26 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256 tokenId = factory.createNewDropWithERC20(
             collection,
             ethPrice,
-            erc20Price,
             address(mockERC20),
+            erc20Price,
             startTime,
             endTime,
-            true, // active
-            true, // eth enabled
-            true // erc20 enabled
+            true // active
         );
 
         // Verify drop details
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
         (
             uint256 price,
-            uint256 erc20PriceReturned,
-            address acceptedERC20,
             uint256 start,
             uint256 end,
-            bool active,
-            bool ethEnabled,
-            bool erc20Enabled
+            bool active
         ) = collectionContract.drops(tokenId);
 
         assertEq(price, ethPrice);
-        assertEq(erc20PriceReturned, erc20Price);
-        assertEq(acceptedERC20, address(mockERC20));
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
-        assertTrue(ethEnabled);
-        assertTrue(erc20Enabled);
-
         vm.stopPrank();
     }
 
@@ -1043,7 +1029,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Mint with ERC20
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        collectionContract.mintWithERC20(user1, 0, nftAmount);
+        collectionContract.mintWithERC20(
+            user1,
+            0,
+            nftAmount,
+            address(mockERC20)
+        );
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), nftAmount);
@@ -1086,13 +1077,11 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256 secondTokenId = factory.createNewDropWithERC20(
             collection,
             1 ether,
-            150 * 10 ** 18, // 150 tokens
             address(mockERC20),
+            150 * 10 ** 18, // 150 tokens
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true, // active
-            true, // eth enabled
-            true // erc20 enabled
+            true // active
         );
         vm.stopPrank();
 
@@ -1120,7 +1109,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // Batch mint with ERC20
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        collectionContract.batchMintWithERC20(user1, tokenIds, amounts);
+        collectionContract.batchMintWithERC20(
+            user1,
+            tokenIds,
+            amounts,
+            address(mockERC20)
+        );
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), 1);
@@ -1132,25 +1126,21 @@ contract BlueprintERC1155FactoryTest is Test {
     function test_RevertWhen_ERC20NotEnabled() public {
         test_CreateCollection();
 
-        // Create drop with ERC20 disabled
+        // Create drop WITHOUT ERC20 support (only ETH enabled)
         vm.startPrank(admin);
-        uint256 tokenId = factory.createNewDropWithERC20(
+        uint256 tokenId = factory.createNewDrop(
             collection,
             1 ether,
-            100 * 10 ** 18,
-            address(mockERC20),
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true, // active
-            true, // eth enabled
-            false // erc20 disabled
+            true // active
         );
         vm.stopPrank();
 
         // Fast forward to after start time
         vm.warp(block.timestamp + 2 days);
 
-        // Try to mint with ERC20
+        // Try to mint with ERC20 that was never configured
         vm.startPrank(user1);
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
@@ -1159,7 +1149,7 @@ contract BlueprintERC1155FactoryTest is Test {
                 BlueprintERC1155.BlueprintERC1155__ERC20NotEnabled.selector
             )
         );
-        collectionContract.mintWithERC20(user1, tokenId, 1);
+        collectionContract.mintWithERC20(user1, tokenId, 1, address(mockERC20));
 
         vm.stopPrank();
     }
@@ -1189,8 +1179,75 @@ contract BlueprintERC1155FactoryTest is Test {
                 erc20Price / 2
             )
         );
-        collectionContract.mintWithERC20(user1, 0, 1);
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
 
+        vm.stopPrank();
+    }
+
+    function test_TrulyFreeERC20Mint() public {
+        test_CreateCollection();
+
+        // Create drop with truly free ERC20 mint (price = 0, no protocol fee)
+        vm.startPrank(admin);
+        uint256 tokenId = factory.createNewDropWithERC20(
+            collection,
+            1 ether, // ETH price
+            address(mockERC20),
+            0, // ERC20 price = 0 (free)
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true // active
+        );
+        vm.stopPrank();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Mint with truly free ERC20 (no payment required)
+        vm.startPrank(user1);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        uint256 balanceBefore = collectionContract.balanceOf(user1, tokenId);
+        
+        // No approval or balance needed for free mint
+        collectionContract.mintWithERC20(user1, tokenId, 5, address(mockERC20));
+
+        uint256 balanceAfter = collectionContract.balanceOf(user1, tokenId);
+        assertEq(balanceAfter, balanceBefore + 5, "Should mint 5 tokens for free");
+
+        vm.stopPrank();
+    }
+
+    function test_DisableERC20() public {
+        test_CreateDropWithERC20();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Verify ERC20 is enabled
+        vm.startPrank(user1);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        mockERC20.approve(collection, 100 * 10 ** 18);
+        
+        // Should work before disabling
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
+        vm.stopPrank();
+
+        // Disable ERC20
+        vm.startPrank(admin);
+        factory.disableERC20(collection, 0, address(mockERC20));
+        vm.stopPrank();
+
+        // Try to mint after disabling - should revert
+        vm.startPrank(user1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BlueprintERC1155.BlueprintERC1155__ERC20NotEnabled.selector
+            )
+        );
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
         vm.stopPrank();
     }
 
@@ -1219,7 +1276,7 @@ contract BlueprintERC1155FactoryTest is Test {
                 insufficientBalance
             )
         );
-        collectionContract.mintWithERC20(user1, 0, 1);
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
 
         vm.stopPrank();
     }
@@ -1230,11 +1287,19 @@ contract BlueprintERC1155FactoryTest is Test {
         vm.startPrank(admin);
 
         uint256 newERC20Price = 200 * 10 ** 18; // 200 tokens
-        factory.updateDropERC20Price(collection, 0, newERC20Price);
+        factory.setERC20PriceForDrop(
+            collection,
+            0,
+            address(mockERC20),
+            newERC20Price
+        );
 
         // Verify price was updated
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        (, uint256 erc20Price, , , , , , ) = collectionContract.drops(0);
+        uint256 erc20Price = collectionContract.erc20Prices(
+            0,
+            address(mockERC20)
+        );
         assertEq(erc20Price, newERC20Price);
 
         vm.stopPrank();
@@ -1245,20 +1310,28 @@ contract BlueprintERC1155FactoryTest is Test {
 
         vm.startPrank(admin);
 
-        // Disable ERC20
-        factory.setDropERC20Enabled(collection, 0, false);
+        // Disable ERC20 (set price to 0)
+        factory.setERC20PriceForDrop(collection, 0, address(mockERC20), 0);
 
         // Verify ERC20 was disabled
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        (, , , , , , , bool erc20Enabled) = collectionContract.drops(0);
-        assertFalse(erc20Enabled);
+        uint256 erc20Price = collectionContract.erc20Prices(
+            0,
+            address(mockERC20)
+        );
+        assertEq(erc20Price, 0);
 
-        // Re-enable ERC20
-        factory.setDropERC20Enabled(collection, 0, true);
+        // Re-enable ERC20 (set price to non-zero)
+        factory.setERC20PriceForDrop(
+            collection,
+            0,
+            address(mockERC20),
+            100 * 10 ** 18
+        );
 
         // Verify ERC20 was re-enabled
-        (, , , , , , , erc20Enabled) = collectionContract.drops(0);
-        assertTrue(erc20Enabled);
+        erc20Price = collectionContract.erc20Prices(0, address(mockERC20));
+        assertEq(erc20Price, 100 * 10 ** 18);
 
         vm.stopPrank();
     }
@@ -1284,7 +1357,7 @@ contract BlueprintERC1155FactoryTest is Test {
         mockERC20.mint(user2, 1000 * 10 ** 18);
         mockERC20.approve(collection, 100 * 10 ** 18);
 
-        collectionContract.mintWithERC20(user2, 0, 1);
+        collectionContract.mintWithERC20(user2, 0, 1, address(mockERC20));
 
         assertEq(collectionContract.balanceOf(user2, 0), 1);
         vm.stopPrank();
@@ -1323,11 +1396,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint NFTs using batch-safe function
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             0,
             nftAmount,
+            address(mockERC20),
             false // strict mode
         );
 
@@ -1352,12 +1426,10 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256 secondDropId = factory.createNewDropWithERC20(
             collection,
             1 ether,
-            150 * 10 ** 18,
             address(mockERC20),
+            150 * 10 ** 18,
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true,
-            true,
             true
         );
         vm.stopPrank();
@@ -1389,21 +1461,23 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint first drop
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             0,
             1,
+            address(mockERC20),
             false
         );
 
         // 3. Mint second drop
         targets[2] = address(collectionContract);
-        datas[2] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[2] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             secondDropId,
             1,
+            address(mockERC20),
             false
         );
 
@@ -1447,11 +1521,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Try to mint without approval (this should fail)
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             0,
             2, // Try to mint 2 but only approved for 1
+            address(mockERC20),
             false
         );
 
@@ -1473,12 +1548,10 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256 secondDropId = factory.createNewDropWithERC20(
             collection,
             1 ether,
-            200 * 10 ** 18, // Different price
             address(mockERC20),
+            200 * 10 ** 18, // Different price
             block.timestamp + 1 days,
             block.timestamp + 30 days,
-            true,
-            true,
             true
         );
         vm.stopPrank();
@@ -1508,21 +1581,23 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 2. Mint first drop (100 tokens)
         targets[1] = address(collectionContract);
-        datas[1] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[1] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             0,
             1,
+            address(mockERC20),
             false
         );
 
         // 3. Mint second drop (200 tokens)
         targets[2] = address(collectionContract);
-        datas[2] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[2] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             secondDropId,
             1,
+            address(mockERC20),
             false
         );
 
@@ -1536,11 +1611,12 @@ contract BlueprintERC1155FactoryTest is Test {
 
         // 5. Mint first drop again (100 tokens)
         targets[4] = address(collectionContract);
-        datas[4] = abi.encodeWithSelector(
-            collectionContract.mintWithERC20BatchSafe.selector,
+        datas[4] = abi.encodeWithSignature(
+            "mintWithERC20BatchSafe(address,uint256,uint256,address,bool)",
             user1,
             0,
             1,
+            address(mockERC20),
             false
         );
 
@@ -1586,7 +1662,13 @@ contract BlueprintERC1155FactoryTest is Test {
             block.timestamp
         );
 
-        collectionContract.mintWithERC20BatchSafe(user1, 0, nftAmount, false); // Strict mode - no fee-on-transfer
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            nftAmount,
+            address(mockERC20),
+            false
+        ); // Strict mode - no fee-on-transfer
 
         // Verify user received NFTs
         assertEq(collectionContract.balanceOf(user1, 0), nftAmount);
@@ -1599,17 +1681,17 @@ contract BlueprintERC1155FactoryTest is Test {
 
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
-        (
-            address paymentToken,
-            uint256 paymentAmount,
-            bool ethEnabled,
-            bool erc20Enabled
-        ) = collectionContract.getPaymentInfo(0, 2);
+        // Test ETH payment info
+        uint256 ethPrice = collectionContract.getETHPaymentInfo(0, 2);
+        assertEq(ethPrice, 2 ether); // 1 ether * 2
 
-        assertEq(paymentToken, address(mockERC20));
-        assertEq(paymentAmount, 200 * 10 ** 18); // 100 * 2
-        assertTrue(ethEnabled);
-        assertTrue(erc20Enabled);
+        // Test ERC20 payment info
+        uint256 erc20Price = collectionContract.getERC20PaymentInfo(
+            0,
+            address(mockERC20),
+            2
+        );
+        assertEq(erc20Price, 200 * 10 ** 18); // 100 * 2
     }
 
     function test_CheckMintEligibility() public {
@@ -1635,7 +1717,12 @@ contract BlueprintERC1155FactoryTest is Test {
             uint256 requiredERC20,
             uint256 currentAllowance,
             uint256 currentBalance
-        ) = collectionContract.checkMintEligibility(user1, 0, 2);
+        ) = collectionContract.checkMintEligibility(
+                user1,
+                0,
+                address(mockERC20),
+                2
+            );
 
         assertTrue(canMintETH);
         assertTrue(canMintERC20);
@@ -1707,7 +1794,284 @@ contract BlueprintERC1155FactoryTest is Test {
             block.timestamp
         );
 
-        collectionContract.mintWithERC20(user1, 0, 1);
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
+
+        vm.stopPrank();
+    }
+
+    // ===== Referral Event Tests =====
+
+    function test_ReferralEvent_ETH_SingleMint_ReferredAndNoRef() public {
+        // Setup collection and drop
+        test_CreateCollection();
+        vm.startPrank(admin);
+        dropId = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        vm.stopPrank();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        address referrer = address(0xABCD);
+
+        // Referred path should emit ReferredMint
+        vm.startPrank(user1);
+        vm.deal(user1, 2 ether);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            dropId,
+            1,
+            address(0),
+            defaultMintFee,
+            block.timestamp
+        );
+        collectionContract.mint{value: defaultMintFee}(
+            user1,
+            dropId,
+            1,
+            referrer
+        );
+
+        // Non-referred path should NOT emit ReferredMint
+        vm.recordLogs();
+        collectionContract.mint{value: defaultMintFee}(user1, dropId, 1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_ERC20_SingleMint_ReferredAndNoRef() public {
+        // Setup ERC20 drop
+        test_CreateDropWithERC20();
+
+        // Fast forward to after start time
+        vm.warp(block.timestamp + 2 days);
+
+        // Fund user and approve
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        vm.startPrank(user1);
+        uint256 erc20Price = 100 * 10 ** 18;
+        mockERC20.approve(collection, erc20Price * 2);
+
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        address referrer = address(0xBEEF);
+
+        // Referred path should emit ReferredMint
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            erc20Price,
+            block.timestamp
+        );
+        collectionContract.mintWithERC20(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            referrer
+        );
+
+        // Non-referred path should NOT emit ReferredMint
+        vm.recordLogs();
+        collectionContract.mintWithERC20(user1, 0, 1, address(mockERC20));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred ERC20 mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_Batch_ETH_ReferredAndNoRef() public {
+        // Setup two ETH drops
+        test_CreateCollection();
+        vm.startPrank(admin);
+        uint256 firstDrop = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        uint256 secondDrop = factory.createNewDrop(
+            collection,
+            defaultMintFee,
+            block.timestamp + 1 days,
+            block.timestamp + 30 days,
+            true
+        );
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 2 days);
+        vm.startPrank(user1);
+        vm.deal(user1, 10 ether);
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+
+        uint256[] memory tokenIds = new uint256[](2);
+        tokenIds[0] = firstDrop;
+        tokenIds[1] = secondDrop;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1;
+        amounts[1] = 2;
+        uint256 totalCost = defaultMintFee * 3;
+        address referrer = address(0xCAFE);
+
+        // Referred batch
+        vm.expectEmit(true, true, true, true);
+        emit ReferredBatchMint(
+            user1,
+            referrer,
+            user1,
+            tokenIds,
+            amounts,
+            address(0),
+            totalCost,
+            block.timestamp
+        );
+        collectionContract.batchMint{value: totalCost}(
+            user1,
+            tokenIds,
+            amounts,
+            referrer
+        );
+
+        // Non-referred batch should NOT emit ReferredBatchMint
+        vm.recordLogs();
+        collectionContract.batchMint{value: totalCost}(
+            user1,
+            tokenIds,
+            amounts
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredBatchMint = keccak256(
+            "ReferredBatchMint(address,address,address,uint256[],uint256[],address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredBatchMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredBatchMint should not be emitted for non-referred ETH batch mint"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_ReferralEvent_ERC20_BatchSafe_ReferredAndNoRef() public {
+        // Setup ERC20 drop
+        test_CreateDropWithERC20();
+        vm.warp(block.timestamp + 2 days);
+
+        // Fund and approve user
+        mockERC20.mint(user1, 1000 * 10 ** 18);
+        vm.startPrank(user1);
+        uint256 erc20Price = 100 * 10 ** 18;
+        mockERC20.approve(collection, erc20Price * 2);
+
+        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
+        address referrer = address(0xDEAD);
+
+        // Referred path
+        vm.expectEmit(true, true, true, true);
+        emit ReferredMint(
+            user1,
+            referrer,
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            erc20Price,
+            block.timestamp
+        );
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            false,
+            referrer
+        );
+
+        // Non-referred path should NOT emit referral
+        vm.recordLogs();
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            false
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topicReferredMint = keccak256(
+            "ReferredMint(address,address,address,uint256,uint256,address,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics.length > 0 &&
+                logs[i].topics[0] == topicReferredMint
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertFalse(
+            found,
+            "ReferredMint should not be emitted for non-referred batch-safe mint"
+        );
 
         vm.stopPrank();
     }
@@ -1785,11 +2149,23 @@ contract BlueprintERC1155FactoryTest is Test {
         BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
 
         // Test strict mode (should work with normal tokens)
-        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, false); // Strict mode
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            false
+        ); // Strict mode
         assertEq(collectionContract.balanceOf(user1, 0), 1);
 
         // Test permissive mode (allows fee-on-transfer tokens)
-        collectionContract.mintWithERC20BatchSafe(user1, 0, 1, true); // Allow fee-on-transfer
+        collectionContract.mintWithERC20BatchSafe(
+            user1,
+            0,
+            1,
+            address(mockERC20),
+            true
+        ); // Allow fee-on-transfer
         assertEq(collectionContract.balanceOf(user1, 0), 2);
 
         vm.stopPrank();
@@ -1811,6 +2187,28 @@ contract BlueprintERC1155FactoryTest is Test {
         uint256[] amounts,
         address indexed paymentToken,
         uint256 totalAmountPaidWei,
+        uint256 timestamp
+    );
+
+    event ReferredMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256 tokenId,
+        uint256 amount,
+        address paymentToken,
+        uint256 amountPaidWeiOrTokenUnits,
+        uint256 timestamp
+    );
+
+    event ReferredBatchMint(
+        address indexed minter,
+        address indexed referrer,
+        address indexed to,
+        uint256[] tokenIds,
+        uint256[] amounts,
+        address paymentToken,
+        uint256 totalAmountPaidWeiOrTokenUnits,
         uint256 timestamp
     );
 }

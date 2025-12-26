@@ -380,6 +380,20 @@ contract RewardPoolFactory is
         );
     }
 
+    /// @notice Claims rewards on behalf of a user for a specific pool (relayed claim)
+    /// @param poolId The pool identifier
+    /// @param data Claim data struct
+    /// @param signature EIP-712 signature from authorized SIGNER_ROLE
+    function claimRewardFor(
+        uint256 poolId,
+        IRewardPool.ClaimData calldata data,
+        bytes calldata signature
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        PoolInfo storage info = s_pools[poolId];
+        if (info.pool == address(0)) revert RewardPoolFactory__NoPoolForId();
+        IRewardPool(info.pool).claimRewardFor(data, signature);
+    }
+
     /// @notice Gets pool information
     /// @param poolId The pool identifier
     /// @return Pool information struct

@@ -177,22 +177,12 @@ contract BlueprintERC1155ZeroTest is Test {
         assertEq(tokenId, 0);
 
         // Verify drop details
-        (
-            uint256 price,
-            uint256 erc20Price,
-            address acceptedERC20,
-            uint256 start,
-            uint256 end,
-            bool active,
-            bool ethEnabled,
-            bool erc20Enabled
-        ) = nft.drops(tokenId);
+        (uint256 price, , , uint256 start, uint256 end, bool active, , ) = nft
+            .drops(tokenId);
         assertEq(price, MINT_PRICE);
         assertEq(start, startTime);
         assertEq(end, endTime);
         assertTrue(active);
-        assertTrue(ethEnabled);
-        assertFalse(erc20Enabled); // ERC20 should be disabled by default
         vm.stopPrank();
     }
 

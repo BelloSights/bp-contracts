@@ -348,7 +348,6 @@ contract UpgradeRewardPool is Script {
 
         Options memory opts;
         opts.unsafeSkipStorageCheck = skipStorageCheck;
-
         Upgrades.upgradeProxy(
             _proxyAddress,
             "RewardPoolFactory.sol",

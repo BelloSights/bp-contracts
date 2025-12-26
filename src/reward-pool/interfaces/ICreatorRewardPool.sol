@@ -18,24 +18,6 @@ interface ICreatorRewardPool {
         TokenType tokenType;
     }
 
-    /// @notice User allocation structure
-    struct UserAllocation {
-        address user;
-        uint256 allocation; // Custom allocation amount set by creator
-    }
-
-    /// @notice Pool information structure
-    struct PoolInfo {
-        uint256 poolId;
-        string name;
-        string description;
-        bool active;
-        uint256 totalAllocations;
-        uint256 userCount;
-        address creator;
-        uint256 protocolFeeRate; // Fee rate in basis points (100 = 1%)
-    }
-
     // ===== ADMIN FUNCTIONS (Factory Only) =====
     function initialize(
         address factory,
@@ -44,30 +26,50 @@ interface ICreatorRewardPool {
         string memory signatureVersion,
         uint256 protocolFeeRate
     ) external;
-    
+
     function setActive(bool active) external;
-    function addUser(address user, uint256 allocation) external;
-    function updateUserAllocation(address user, uint256 newAllocation) external;
-    function removeUser(address user) external;
+    function addUser(
+        address user,
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 allocation
+    ) external;
+    function updateUserAllocation(
+        address user,
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 newAllocation
+    ) external;
+    function removeUser(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external;
     function grantSignerRole(address signer) external;
     function revokeSignerRole(address signer) external;
     function setProtocolFeeRecipient(address recipient) external;
 
     // ===== BATCH ADMIN FUNCTIONS (Factory Only) =====
     function batchAddUsers(
+        address tokenAddress,
+        TokenType tokenType,
         address[] calldata users,
         uint256[] calldata allocations
     ) external;
-    
+
     function batchUpdateUserAllocations(
+        address tokenAddress,
+        TokenType tokenType,
         address[] calldata users,
         uint256[] calldata newAllocations
     ) external;
-    
-    function batchRemoveUsers(address[] calldata users) external;
 
-    function takeSnapshot(address[] calldata tokenAddresses) external;
-    function takeNativeSnapshot() external;
+    function batchRemoveUsers(
+        address tokenAddress,
+        TokenType tokenType,
+        address[] calldata users
+    ) external;
+
     function emergencyWithdraw(
         address tokenAddress,
         address to,
@@ -80,18 +82,44 @@ interface ICreatorRewardPool {
         address user,
         address tokenAddress,
         TokenType tokenType
-    ) external view returns (bool canClaim, uint256 allocation, uint256 protocolFee);
+    )
+        external
+        view
+        returns (bool canClaim, uint256 allocation, uint256 protocolFee);
 
     function claimReward(
         ClaimData calldata data,
         bytes calldata signature
     ) external;
 
+    /// @notice Claim rewards on behalf of a user (relayed claim)
+    /// @param data Claim data struct
+    /// @param signature EIP-712 signature
+    function claimRewardFor(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external;
+
     // ===== VIEW FUNCTIONS =====
-    function getUserAllocation(address user) external view returns (uint256);
-    function isUser(address user) external view returns (bool);
-    function getTotalUsers() external view returns (uint256);
-    function getUserAtIndex(uint256 index) external view returns (address);
+    function getUserAllocationForToken(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
+    function isUserForToken(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool);
+    function getTotalUsersForToken(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
+    function getUserAtIndexForToken(
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 index
+    ) external view returns (address);
     function hasClaimed(
         address user,
         address tokenAddress,
@@ -109,14 +137,6 @@ interface ICreatorRewardPool {
         address tokenAddress,
         TokenType tokenType
     ) external view returns (uint256);
-    function getSnapshotAmount(
-        address tokenAddress,
-        TokenType tokenType
-    ) external view returns (uint256);
-    function getTotalRewards(
-        address tokenAddress,
-        TokenType tokenType
-    ) external view returns (uint256);
     function getUserNonceCounter(address user) external view returns (uint256);
     function isNonceUsed(
         address user,
@@ -126,20 +146,45 @@ interface ICreatorRewardPool {
     function validateAllocations(
         address tokenAddress,
         TokenType tokenType
-    ) external view returns (bool isValid, uint256 totalAllocations, uint256 availableBalance);
+    )
+        external
+        view
+        returns (
+            bool isValid,
+            uint256 totalAllocations,
+            uint256 availableBalance
+        );
     function getCreator() external view returns (address);
     function getProtocolFeeRate() external view returns (uint256);
     function getProtocolFeeRecipient() external view returns (address);
     function s_active() external view returns (bool);
-    function s_totalAllocations() external view returns (uint256);
-    function s_snapshotTaken() external view returns (bool);
+    function getTotalAllocationsForToken(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256);
 
     // ===== EVENTS =====
     event PoolActivated();
     event PoolDeactivated();
-    event UserAdded(address indexed user, uint256 allocation);
-    event UserAllocationUpdated(address indexed user, uint256 oldAllocation, uint256 newAllocation);
-    event UserRemoved(address indexed user, uint256 allocation);
+    event UserAdded(
+        address indexed user,
+        address indexed tokenAddress,
+        TokenType tokenType,
+        uint256 allocation
+    );
+    event UserAllocationUpdated(
+        address indexed user,
+        address indexed tokenAddress,
+        TokenType tokenType,
+        uint256 oldAllocation,
+        uint256 newAllocation
+    );
+    event UserRemoved(
+        address indexed user,
+        address indexed tokenAddress,
+        TokenType tokenType,
+        uint256 allocation
+    );
     event RewardClaimed(
         address indexed user,
         address indexed tokenAddress,
@@ -156,7 +201,10 @@ interface ICreatorRewardPool {
         TokenType tokenType,
         address indexed recipient
     );
-    event ProtocolFeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event ProtocolFeeRecipientUpdated(
+        address indexed oldRecipient,
+        address indexed newRecipient
+    );
     event ProtocolFeeRateUpdated(uint256 oldRate, uint256 newRate);
 
     // ===== BATCH EVENTS =====
@@ -177,12 +225,7 @@ interface ICreatorRewardPool {
         uint256 batchSize
     );
 
-    event SnapshotTaken(
-        uint256 nativeAmount,
-        address[] tokens,
-        uint256[] tokenAmounts
-    );
-    
+    // Optional event for offchain monitoring of allocation/balance mismatch
     event AllocationValidationWarning(
         address indexed tokenAddress,
         TokenType tokenType,
@@ -190,4 +233,4 @@ interface ICreatorRewardPool {
         uint256 availableBalance,
         string message
     );
-} 
+}

@@ -14,7 +14,6 @@ import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Ini
 import {AccessControlUpgradeable} from "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Clones} from "@openzeppelin-contracts/proxy/Clones.sol";
-import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 import {CreatorRewardPool} from "./CreatorRewardPool.sol";
 import {ICreatorRewardPool} from "./interfaces/ICreatorRewardPool.sol";
 
@@ -32,12 +31,9 @@ contract CreatorRewardPoolFactory is
     uint256 public constant DEFAULT_PROTOCOL_FEE_RATE = 100; // 1% default
 
     // ===== ERRORS =====
-    error CreatorRewardPoolFactory__OnlyCallableByAdmin();
     error CreatorRewardPoolFactory__NoPoolForCreator();
     error CreatorRewardPoolFactory__PoolAlreadyExists();
     error CreatorRewardPoolFactory__ZeroAddress();
-    error CreatorRewardPoolFactory__PoolNotActive();
-    error CreatorRewardPoolFactory__InvalidCreator();
     error CreatorRewardPoolFactory__InvalidProtocolFeeRate();
 
     // ===== STATE =====
@@ -57,7 +53,7 @@ contract CreatorRewardPoolFactory is
 
     // Mapping from creator address to their pool info
     mapping(address => CreatorPoolInfo) public s_creatorPools;
-    
+
     // Array to keep track of all creators (for enumeration)
     address[] public s_creators;
     mapping(address => bool) public s_hasPool;
@@ -72,15 +68,32 @@ contract CreatorRewardPoolFactory is
     );
     event CreatorPoolActivated(address indexed creator);
     event CreatorPoolDeactivated(address indexed creator);
-    event UserAdded(address indexed creator, address indexed user, uint256 allocation);
+    event UserAdded(
+        address indexed creator,
+        address indexed user,
+        address indexed tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
+        uint256 allocation
+    );
     event AllocationUpdated(
         address indexed creator,
         address indexed user,
+        address indexed tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         uint256 oldAllocation,
         uint256 newAllocation
     );
-    event UserRemoved(address indexed creator, address indexed user, uint256 allocation);
-    event ProtocolFeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event UserRemoved(
+        address indexed creator,
+        address indexed user,
+        address indexed tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
+        uint256 allocation
+    );
+    event ProtocolFeeRecipientUpdated(
+        address indexed oldRecipient,
+        address indexed newRecipient
+    );
     event DefaultProtocolFeeRateUpdated(uint256 oldRate, uint256 newRate);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -98,13 +111,15 @@ contract CreatorRewardPoolFactory is
         address _protocolFeeRecipient
     ) external initializer {
         if (admin == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
-        if (_implementation == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
-        if (_protocolFeeRecipient == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
-        
+        if (_implementation == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
+        if (_protocolFeeRecipient == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
+
         __AccessControl_init();
         __UUPSUpgradeable_init();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        
+
         implementation = _implementation;
         protocolFeeRecipient = _protocolFeeRecipient;
         defaultProtocolFeeRate = DEFAULT_PROTOCOL_FEE_RATE;
@@ -115,7 +130,8 @@ contract CreatorRewardPoolFactory is
     function setImplementation(
         address _implementation
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_implementation == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
+        if (_implementation == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
         implementation = _implementation;
     }
 
@@ -124,7 +140,8 @@ contract CreatorRewardPoolFactory is
     function setProtocolFeeRecipient(
         address _protocolFeeRecipient
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_protocolFeeRecipient == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
+        if (_protocolFeeRecipient == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
         address oldRecipient = protocolFeeRecipient;
         protocolFeeRecipient = _protocolFeeRecipient;
         emit ProtocolFeeRecipientUpdated(oldRecipient, _protocolFeeRecipient);
@@ -135,7 +152,8 @@ contract CreatorRewardPoolFactory is
     function setDefaultProtocolFeeRate(
         uint256 _defaultProtocolFeeRate
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_defaultProtocolFeeRate > 1000) revert CreatorRewardPoolFactory__InvalidProtocolFeeRate(); // Max 10%
+        if (_defaultProtocolFeeRate > 1000)
+            revert CreatorRewardPoolFactory__InvalidProtocolFeeRate(); // Max 10%
         uint256 oldRate = defaultProtocolFeeRate;
         defaultProtocolFeeRate = _defaultProtocolFeeRate;
         emit DefaultProtocolFeeRateUpdated(oldRate, _defaultProtocolFeeRate);
@@ -151,14 +169,20 @@ contract CreatorRewardPoolFactory is
         string calldata name,
         string calldata description
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (address) {
-        return _createCreatorRewardPool(creator, name, description, defaultProtocolFeeRate);
+        return
+            _createCreatorRewardPool(
+                creator,
+                name,
+                description,
+                defaultProtocolFeeRate
+            );
     }
 
     /// @notice Creates a new creator reward pool with custom protocol fee rate
     /// @param creator The creator address who will own this pool
     /// @param name Name of the reward pool
     /// @param description Description of the reward pool
-    /// @param protocolFeeRate Custom protocol fee rate in basis points
+    /// @param protocolFeeRate Custom protocol fee rate in basis points (0 = no fee, max 1000 = 10%)
     /// @return pool The address of the newly created pool
     function createCreatorRewardPoolWithCustomFee(
         address creator,
@@ -166,8 +190,28 @@ contract CreatorRewardPoolFactory is
         string calldata description,
         uint256 protocolFeeRate
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (address) {
-        if (protocolFeeRate > 1000) revert CreatorRewardPoolFactory__InvalidProtocolFeeRate(); // Max 10%
-        return _createCreatorRewardPool(creator, name, description, protocolFeeRate);
+        if (protocolFeeRate > 1000)
+            revert CreatorRewardPoolFactory__InvalidProtocolFeeRate(); // Max 10%
+        return
+            _createCreatorRewardPool(
+                creator,
+                name,
+                description,
+                protocolFeeRate
+            );
+    }
+
+    /// @notice Creates a new creator reward pool with no protocol fees
+    /// @param creator The creator address who will own this pool
+    /// @param name Name of the reward pool
+    /// @param description Description of the reward pool
+    /// @return pool The address of the newly created pool
+    function createCreatorRewardPoolWithoutFee(
+        address creator,
+        string calldata name,
+        string calldata description
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (address) {
+        return _createCreatorRewardPool(creator, name, description, 0); // 0% protocol fee
     }
 
     /// @notice Internal function to create a creator reward pool
@@ -182,9 +226,12 @@ contract CreatorRewardPoolFactory is
         string calldata description,
         uint256 protocolFeeRate
     ) internal returns (address) {
-        if (implementation == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
-        if (creator == address(0)) revert CreatorRewardPoolFactory__ZeroAddress();
-        if (s_hasPool[creator]) revert CreatorRewardPoolFactory__PoolAlreadyExists();
+        if (implementation == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
+        if (creator == address(0))
+            revert CreatorRewardPoolFactory__ZeroAddress();
+        if (s_hasPool[creator])
+            revert CreatorRewardPoolFactory__PoolAlreadyExists();
 
         // Create a clone of the shared implementation
         address clone = Clones.clone(implementation);
@@ -214,7 +261,13 @@ contract CreatorRewardPoolFactory is
         s_creators.push(creator);
         s_hasPool[creator] = true;
 
-        emit CreatorPoolCreated(creator, clone, name, description, protocolFeeRate);
+        emit CreatorPoolCreated(
+            creator,
+            clone,
+            name,
+            description,
+            protocolFeeRate
+        );
 
         return clone;
     }
@@ -225,7 +278,8 @@ contract CreatorRewardPoolFactory is
         address creator
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         info.active = true;
         ICreatorRewardPool(info.pool).setActive(true);
@@ -238,7 +292,8 @@ contract CreatorRewardPoolFactory is
         address creator
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         info.active = false;
         ICreatorRewardPool(info.pool).setActive(false);
@@ -252,13 +307,21 @@ contract CreatorRewardPoolFactory is
     function addUser(
         address creator,
         address user,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         uint256 allocation
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
-        ICreatorRewardPool(info.pool).addUser(user, allocation);
-        emit UserAdded(creator, user, allocation);
+        ICreatorRewardPool(info.pool).addUser(
+            user,
+            tokenAddress,
+            tokenType,
+            allocation
+        );
+        emit UserAdded(creator, user, tokenAddress, tokenType, allocation);
     }
 
     /// @notice Updates allocation for an existing user in a creator's pool
@@ -268,14 +331,30 @@ contract CreatorRewardPoolFactory is
     function updateUserAllocation(
         address creator,
         address user,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         uint256 newAllocation
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
-        uint256 oldAllocation = ICreatorRewardPool(info.pool).getUserAllocation(user);
-        ICreatorRewardPool(info.pool).updateUserAllocation(user, newAllocation);
-        emit AllocationUpdated(creator, user, oldAllocation, newAllocation);
+        uint256 oldAllocation = ICreatorRewardPool(info.pool)
+            .getUserAllocationForToken(user, tokenAddress, tokenType);
+        ICreatorRewardPool(info.pool).updateUserAllocation(
+            user,
+            tokenAddress,
+            tokenType,
+            newAllocation
+        );
+        emit AllocationUpdated(
+            creator,
+            user,
+            tokenAddress,
+            tokenType,
+            oldAllocation,
+            newAllocation
+        );
     }
 
     /// @notice Removes a user from a creator's reward pool
@@ -283,14 +362,18 @@ contract CreatorRewardPoolFactory is
     /// @param user The user address to remove
     function removeUser(
         address creator,
-        address user
+        address user,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
-        uint256 allocation = ICreatorRewardPool(info.pool).getUserAllocation(user);
-        ICreatorRewardPool(info.pool).removeUser(user);
-        emit UserRemoved(creator, user, allocation);
+        uint256 allocation = ICreatorRewardPool(info.pool)
+            .getUserAllocationForToken(user, tokenAddress, tokenType);
+        ICreatorRewardPool(info.pool).removeUser(user, tokenAddress, tokenType);
+        emit UserRemoved(creator, user, tokenAddress, tokenType, allocation);
     }
 
     // ===== BATCH USER MANAGEMENT FUNCTIONS =====
@@ -301,17 +384,31 @@ contract CreatorRewardPoolFactory is
     /// @param allocations Array of allocation amounts for users
     function batchAddUsers(
         address creator,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         address[] calldata users,
         uint256[] calldata allocations
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
-        ICreatorRewardPool(info.pool).batchAddUsers(users, allocations);
+        ICreatorRewardPool(info.pool).batchAddUsers(
+            tokenAddress,
+            tokenType,
+            users,
+            allocations
+        );
 
         // Emit individual events for each user for compatibility
         for (uint256 i = 0; i < users.length; ) {
-            emit UserAdded(creator, users[i], allocations[i]);
+            emit UserAdded(
+                creator,
+                users[i],
+                tokenAddress,
+                tokenType,
+                allocations[i]
+            );
             unchecked {
                 ++i;
             }
@@ -324,26 +421,42 @@ contract CreatorRewardPoolFactory is
     /// @param newAllocations Array of new allocation amounts
     function batchUpdateUserAllocations(
         address creator,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         address[] calldata users,
         uint256[] calldata newAllocations
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         // Get old allocation values for events
         uint256[] memory oldAllocations = new uint256[](users.length);
         for (uint256 i = 0; i < users.length; ) {
-            oldAllocations[i] = ICreatorRewardPool(info.pool).getUserAllocation(users[i]);
+            oldAllocations[i] = ICreatorRewardPool(info.pool)
+                .getUserAllocationForToken(users[i], tokenAddress, tokenType);
             unchecked {
                 ++i;
             }
         }
 
-        ICreatorRewardPool(info.pool).batchUpdateUserAllocations(users, newAllocations);
+        ICreatorRewardPool(info.pool).batchUpdateUserAllocations(
+            tokenAddress,
+            tokenType,
+            users,
+            newAllocations
+        );
 
         // Emit individual events for each user for compatibility
         for (uint256 i = 0; i < users.length; ) {
-            emit AllocationUpdated(creator, users[i], oldAllocations[i], newAllocations[i]);
+            emit AllocationUpdated(
+                creator,
+                users[i],
+                tokenAddress,
+                tokenType,
+                oldAllocations[i],
+                newAllocations[i]
+            );
             unchecked {
                 ++i;
             }
@@ -355,25 +468,39 @@ contract CreatorRewardPoolFactory is
     /// @param users Array of user addresses to remove
     function batchRemoveUsers(
         address creator,
+        address tokenAddress,
+        ICreatorRewardPool.TokenType tokenType,
         address[] calldata users
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         // Get allocation values for events before removal
         uint256[] memory allocations = new uint256[](users.length);
         for (uint256 i = 0; i < users.length; ) {
-            allocations[i] = ICreatorRewardPool(info.pool).getUserAllocation(users[i]);
+            allocations[i] = ICreatorRewardPool(info.pool)
+                .getUserAllocationForToken(users[i], tokenAddress, tokenType);
             unchecked {
                 ++i;
             }
         }
 
-        ICreatorRewardPool(info.pool).batchRemoveUsers(users);
+        ICreatorRewardPool(info.pool).batchRemoveUsers(
+            tokenAddress,
+            tokenType,
+            users
+        );
 
         // Emit individual events for each user for compatibility
         for (uint256 i = 0; i < users.length; ) {
-            emit UserRemoved(creator, users[i], allocations[i]);
+            emit UserRemoved(
+                creator,
+                users[i],
+                tokenAddress,
+                tokenType,
+                allocations[i]
+            );
             unchecked {
                 ++i;
             }
@@ -388,7 +515,8 @@ contract CreatorRewardPoolFactory is
         address signer
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         ICreatorRewardPool(info.pool).grantSignerRole(signer);
     }
@@ -401,33 +529,10 @@ contract CreatorRewardPoolFactory is
         address signer
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         ICreatorRewardPool(info.pool).revokeSignerRole(signer);
-    }
-
-    /// @notice Takes a snapshot of current balances for reward distribution
-    /// @param creator The creator address
-    /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function takeSnapshot(
-        address creator,
-        address[] calldata tokenAddresses
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
-
-        ICreatorRewardPool(info.pool).takeSnapshot(tokenAddresses);
-    }
-
-    /// @notice Takes a snapshot of only native ETH for reward distribution
-    /// @param creator The creator address
-    function takeNativeSnapshot(
-        address creator
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
-
-        ICreatorRewardPool(info.pool).takeNativeSnapshot();
     }
 
     /// @notice Emergency withdrawal of funds from a creator's pool
@@ -444,7 +549,8 @@ contract CreatorRewardPoolFactory is
         ICreatorRewardPool.TokenType tokenType
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
         ICreatorRewardPool(info.pool).emergencyWithdraw(
             tokenAddress,
@@ -454,14 +560,35 @@ contract CreatorRewardPoolFactory is
         );
     }
 
+    /// @notice Claims rewards on behalf of a user for a specific creator's pool (relayed claim)
+    /// @param creator The creator address
+    /// @param data Claim data struct
+    /// @param signature EIP-712 signature from authorized SIGNER_ROLE
+    function claimRewardFor(
+        address creator,
+        ICreatorRewardPool.ClaimData calldata data,
+        bytes calldata signature
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        CreatorPoolInfo storage info = s_creatorPools[creator];
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
+
+        ICreatorRewardPool(info.pool).claimRewardFor(data, signature);
+    }
+
     /// @notice Updates the protocol fee recipient for all existing pools
     /// @dev This will update the fee recipient for all deployed pools
-    function updateProtocolFeeRecipientForAllPools() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateProtocolFeeRecipientForAllPools()
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         for (uint256 i = 0; i < s_creators.length; ) {
             address creator = s_creators[i];
             CreatorPoolInfo storage info = s_creatorPools[creator];
             if (info.pool != address(0)) {
-                ICreatorRewardPool(info.pool).setProtocolFeeRecipient(protocolFeeRecipient);
+                ICreatorRewardPool(info.pool).setProtocolFeeRecipient(
+                    protocolFeeRecipient
+                );
             }
             unchecked {
                 ++i;
@@ -483,9 +610,12 @@ contract CreatorRewardPoolFactory is
     /// @notice Gets the pool address for a given creator
     /// @param creator The creator address
     /// @return The pool address
-    function getCreatorPoolAddress(address creator) external view returns (address) {
+    function getCreatorPoolAddress(
+        address creator
+    ) external view returns (address) {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
         return info.pool;
     }
 
@@ -527,11 +657,24 @@ contract CreatorRewardPoolFactory is
         address creator,
         address tokenAddress,
         ICreatorRewardPool.TokenType tokenType
-    ) external view returns (bool isValid, uint256 totalAllocations, uint256 availableBalance) {
+    )
+        external
+        view
+        returns (
+            bool isValid,
+            uint256 totalAllocations,
+            uint256 availableBalance
+        )
+    {
         CreatorPoolInfo storage info = s_creatorPools[creator];
-        if (info.pool == address(0)) revert CreatorRewardPoolFactory__NoPoolForCreator();
+        if (info.pool == address(0))
+            revert CreatorRewardPoolFactory__NoPoolForCreator();
 
-        return ICreatorRewardPool(info.pool).validateAllocations(tokenAddress, tokenType);
+        return
+            ICreatorRewardPool(info.pool).validateAllocations(
+                tokenAddress,
+                tokenType
+            );
     }
 
     /// @notice Authorizes contract upgrades
@@ -546,4 +689,4 @@ contract CreatorRewardPoolFactory is
     ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
-} 
+}

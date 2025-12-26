@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { Address, PublicClient, WalletClient } from "viem";
-import { rewardpoolAbi, rewardpoolfactoryAbi } from "../abis";
+import { rewardpoolAbi, rewardPoolFactoryAbi } from "../abis";
 import { createViemClients, getContractsForChain } from "./viem";
 
 /**
@@ -455,7 +455,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "createRewardPool",
       args: [name, description],
     });
@@ -526,7 +526,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "addUser",
       args: [poolId, this.formatAddress(userAddress), xp],
     });
@@ -548,7 +548,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "updateUserXP",
       args: [poolId, this.formatAddress(userAddress), newXP],
     });
@@ -570,7 +570,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "penalizeUser",
       args: [poolId, this.formatAddress(userAddress), xpToRemove],
     });
@@ -610,7 +610,7 @@ export class RewardPoolSDK {
 
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "batchAddUsers",
       args: [poolId, userAddresses, xpAmounts],
     });
@@ -652,7 +652,7 @@ export class RewardPoolSDK {
 
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "batchUpdateUserXP",
       args: [poolId, userAddresses, newXPAmounts],
     });
@@ -694,7 +694,7 @@ export class RewardPoolSDK {
 
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "batchPenalizeUsers",
       args: [poolId, userAddresses, xpToRemove],
     });
@@ -722,7 +722,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "addRewards",
       args: [poolId, this.formatAddress(tokenAddress), amount, tokenType],
       value: tokenType === TokenType.ERC20 ? value || amount : undefined,
@@ -738,7 +738,7 @@ export class RewardPoolSDK {
   async activatePool({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "activatePool",
       args: [poolId],
     });
@@ -752,7 +752,7 @@ export class RewardPoolSDK {
   async deactivatePool({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "deactivatePool",
       args: [poolId],
     });
@@ -773,7 +773,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "takeSnapshot",
       args: [poolId, tokenAddresses],
     });
@@ -788,7 +788,7 @@ export class RewardPoolSDK {
   async takeNativeSnapshot({ poolId }: { poolId: bigint }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "takeNativeSnapshot",
       args: [poolId],
     });
@@ -808,7 +808,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "grantSignerRole",
       args: [poolId, this.formatAddress(signerAddress)],
     });
@@ -828,7 +828,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "revokeSignerRole",
       args: [poolId, this.formatAddress(signerAddress)],
     });
@@ -854,7 +854,7 @@ export class RewardPoolSDK {
   }) {
     const tx = await this.signAndSendTransaction({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "emergencyWithdraw",
       args: [
         poolId,
@@ -889,6 +889,50 @@ export class RewardPoolSDK {
       abi: rewardpoolAbi,
       functionName: "claimReward",
       args: [claimData, signature],
+    });
+
+    return { tx };
+  }
+
+  /**
+   * Claim rewards on behalf of a user via the pool's relayed entrypoint
+   */
+  async claimRewardFor({
+    poolAddress,
+    claimData,
+    signature,
+  }: {
+    poolAddress: Address;
+    claimData: ClaimData;
+    signature: `0x${string}`;
+  }) {
+    const tx = await this.signAndSendTransaction({
+      address: this.formatAddress(poolAddress),
+      abi: rewardpoolAbi,
+      functionName: "claimRewardFor",
+      args: [claimData, signature],
+    });
+
+    return { tx };
+  }
+
+  /**
+   * Claim rewards on behalf of a user via the factory (admin-only)
+   */
+  async claimRewardForViaFactory({
+    poolId,
+    claimData,
+    signature,
+  }: {
+    poolId: bigint;
+    claimData: ClaimData;
+    signature: `0x${string}`;
+  }) {
+    const tx = await this.signAndSendTransaction({
+      address: this.FACTORY_ADDRESS,
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
+      functionName: "claimRewardFor",
+      args: [poolId, claimData, signature],
     });
 
     return { tx };
@@ -934,6 +978,53 @@ export class RewardPoolSDK {
   }
 
   /**
+   * Generate and relay a claim on behalf of a user (via pool or factory)
+   */
+  async claimRewardForWithSigner({
+    poolAddress,
+    poolId,
+    userAddress,
+    tokenAddress,
+    tokenType,
+    viaFactory = false,
+  }: {
+    poolAddress: Address;
+    poolId?: bigint;
+    userAddress: Address;
+    tokenAddress: Address;
+    tokenType: TokenType;
+    viaFactory?: boolean;
+  }) {
+    const nonce = await this.getNextNonce({ poolAddress, userAddress });
+
+    const claimData: ClaimData = {
+      user: this.formatAddress(userAddress),
+      nonce,
+      tokenAddress: this.formatAddress(tokenAddress),
+      tokenType,
+    };
+
+    const signature = await this.generateClaimSignature(claimData, poolAddress);
+
+    if (viaFactory) {
+      if (poolId === undefined) {
+        throw new Error("poolId is required when claiming via factory");
+      }
+      return await this.claimRewardForViaFactory({
+        poolId,
+        claimData,
+        signature,
+      });
+    }
+
+    return await this.claimRewardFor({
+      poolAddress,
+      claimData,
+      signature,
+    });
+  }
+
+  /**
    * Read methods
    */
 
@@ -943,7 +1034,7 @@ export class RewardPoolSDK {
   async getPoolInfo({ poolId }: { poolId: bigint }): Promise<PoolInfo> {
     const result = await this.readContractWithRetry<any>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "getPoolInfo",
       args: [poolId],
     });
@@ -990,7 +1081,7 @@ export class RewardPoolSDK {
   async getPoolAddress({ poolId }: { poolId: bigint }): Promise<Address> {
     return this.readContractWithRetry<Address>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "getPoolAddress",
       args: [poolId],
     });
@@ -1002,7 +1093,7 @@ export class RewardPoolSDK {
   async getPoolCount(): Promise<bigint> {
     return this.readContractWithRetry<bigint>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "s_nextPoolId",
     });
   }
@@ -1473,7 +1564,7 @@ export class RewardPoolSDK {
       "0x0000000000000000000000000000000000000000000000000000000000000000";
     return this.readContractWithRetry<boolean>({
       address: this.FACTORY_ADDRESS,
-      abi: [...rewardpoolfactoryAbi, ...rewardpoolAbi],
+      abi: [...rewardPoolFactoryAbi, ...rewardpoolAbi],
       functionName: "hasRole",
       args: [DEFAULT_ADMIN_ROLE, this.formatAddress(address)],
     });

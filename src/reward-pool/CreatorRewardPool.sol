@@ -38,10 +38,8 @@ contract CreatorRewardPool is
     error CreatorRewardPool__UserNotInPool();
     error CreatorRewardPool__InvalidSignature();
     error CreatorRewardPool__NonceAlreadyUsed();
-    error CreatorRewardPool__InvalidNonce();
     error CreatorRewardPool__InsufficientRewards();
     error CreatorRewardPool__ZeroAddress();
-    error CreatorRewardPool__ZeroAllocation();
     error CreatorRewardPool__UserAlreadyExists();
     error CreatorRewardPool__TransferFailed();
     error CreatorRewardPool__InvalidTokenType();
@@ -51,11 +49,9 @@ contract CreatorRewardPool is
     error CreatorRewardPool__InsufficientPoolBalance();
     error CreatorRewardPool__CannotWithdrawWhenActive();
     error CreatorRewardPool__InvalidProtocolFeeRate();
-    error CreatorRewardPool__AllocationsExceedBalance();
 
     // ===== CONSTANTS =====
     uint256 public constant MAX_PROTOCOL_FEE_RATE = 1000; // 10% maximum
-    uint256 public constant DEFAULT_PROTOCOL_FEE_RATE = 100; // 1% default
     uint256 public constant FEE_PRECISION = 10000; // 0.01% precision (basis points)
 
     // ===== STATE VARIABLES =====
@@ -65,24 +61,22 @@ contract CreatorRewardPool is
     uint256 public s_protocolFeeRate; // Fee rate in basis points (100 = 1%)
     address public s_protocolFeeRecipient;
 
-    // EIP-712 domain separator components
-    string public s_signingDomain;
-    string public s_signatureVersion;
+    // Per-token allocation tracking
+    mapping(address => mapping(TokenType => mapping(address => uint256)))
+        public s_userAllocationsByToken;
 
-    // Allocation tracking (replaces XP system)
-    mapping(address => uint256) public s_userAllocations;
-    address[] public s_users;
-    mapping(address => bool) public s_isUser;
-    uint256 public s_totalAllocations;
+    // Per-token user tracking
+    mapping(address => mapping(TokenType => address[])) public s_usersByToken;
+    mapping(address => mapping(TokenType => mapping(address => bool)))
+        public s_isUserByToken;
+
+    // Per-token total allocations
+    mapping(address => mapping(TokenType => uint256))
+        public s_totalAllocationsByToken;
 
     // Nonce tracking for replay protection (per-user)
     mapping(address => mapping(uint256 => bool)) public s_usedNonces;
     mapping(address => uint256) public s_userNonceCounter;
-
-    // Snapshot system for reward distribution
-    mapping(address => uint256) public s_rewardSnapshots; // ERC20 snapshots
-    uint256 public s_nativeRewardSnapshot; // ETH snapshot
-    bool public s_snapshotTaken; // Whether snapshot has been taken
 
     // Claim tracking to prevent double claiming
     mapping(address => mapping(address => mapping(TokenType => bool)))
@@ -90,7 +84,8 @@ contract CreatorRewardPool is
 
     // Track total claimed amounts and protocol fees
     mapping(address => mapping(TokenType => uint256)) public s_totalClaimed;
-    mapping(address => mapping(TokenType => uint256)) public s_protocolFeesClaimed;
+    mapping(address => mapping(TokenType => uint256))
+        public s_protocolFeesClaimed;
 
     // Roles
     bytes32 public constant SIGNER_ROLE = keccak256("SIGNER");
@@ -111,7 +106,7 @@ contract CreatorRewardPool is
     /// @param creator The creator address who owns this pool
     /// @param signingDomain The EIP-712 signing domain
     /// @param signatureVersion The signature version
-    /// @param protocolFeeRate The protocol fee rate in basis points
+    /// @param protocolFeeRate The protocol fee rate in basis points (0 = no fees, max 1000 = 10%)
     function initialize(
         address factory,
         address creator,
@@ -121,7 +116,7 @@ contract CreatorRewardPool is
     ) external initializer {
         if (factory == address(0)) revert CreatorRewardPool__ZeroAddress();
         if (creator == address(0)) revert CreatorRewardPool__ZeroAddress();
-        if (protocolFeeRate > MAX_PROTOCOL_FEE_RATE) 
+        if (protocolFeeRate > MAX_PROTOCOL_FEE_RATE)
             revert CreatorRewardPool__InvalidProtocolFeeRate();
 
         __AccessControl_init();
@@ -131,8 +126,6 @@ contract CreatorRewardPool is
 
         s_factory = factory;
         s_creator = creator;
-        s_signingDomain = signingDomain;
-        s_signatureVersion = signatureVersion;
         s_protocolFeeRate = protocolFeeRate;
         s_protocolFeeRecipient = factory; // Default to factory
         s_active = false;
@@ -173,105 +166,106 @@ contract CreatorRewardPool is
         emit ProtocolFeeRecipientUpdated(oldRecipient, recipient);
     }
 
-    /// @notice Takes a snapshot of current balances for reward distribution
-    /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function takeSnapshot(
-        address[] calldata tokenAddresses
+    /// @notice Adds a new user to the pool with custom allocation for a specific token
+    /// @param user User address
+    /// @param tokenAddress Token address (address(0) for native)
+    /// @param tokenType Token type (NATIVE or ERC20)
+    /// @param allocation Absolute allocation amount for this token
+    function addUser(
+        address user,
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 allocation
     ) external onlyFactory {
-        _takeSnapshotWithTokens(tokenAddresses);
-    }
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (user == address(0)) revert CreatorRewardPool__ZeroAddress();
 
-    /// @notice Takes a snapshot of only native ETH for reward distribution
-    function takeNativeSnapshot() external onlyFactory {
-        _takeSnapshot();
-    }
-
-    /// @notice Internal function to take snapshot of native ETH only
-    function _takeSnapshot() internal {
-        s_nativeRewardSnapshot = address(this).balance;
-        s_snapshotTaken = true;
-
-        // Emit event with empty token arrays
-        address[] memory emptyTokens = new address[](0);
-        uint256[] memory emptyAmounts = new uint256[](0);
-        emit SnapshotTaken(s_nativeRewardSnapshot, emptyTokens, emptyAmounts);
-    }
-
-    /// @notice Internal function to take snapshot with specific tokens
-    /// @param tokenAddresses Array of ERC20 token addresses to snapshot
-    function _takeSnapshotWithTokens(
-        address[] calldata tokenAddresses
-    ) internal {
-        // Snapshot native ETH
-        s_nativeRewardSnapshot = address(this).balance;
-
-        // Snapshot ERC20 tokens
-        uint256[] memory tokenAmounts = new uint256[](tokenAddresses.length);
-        for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            uint256 balance = IERC20(tokenAddresses[i]).balanceOf(
-                address(this)
-            );
-            s_rewardSnapshots[tokenAddresses[i]] = balance;
-            tokenAmounts[i] = balance;
+        // Validate token parameters
+        if (tokenType == TokenType.NATIVE) {
+            if (tokenAddress != address(0))
+                revert CreatorRewardPool__InvalidTokenType();
+        } else if (tokenType == TokenType.ERC20) {
+            if (tokenAddress == address(0))
+                revert CreatorRewardPool__InvalidTokenType();
+        } else {
+            revert CreatorRewardPool__InvalidTokenType();
         }
 
-        s_snapshotTaken = true;
-        emit SnapshotTaken(
-            s_nativeRewardSnapshot,
-            tokenAddresses,
-            tokenAmounts
+        if (s_isUserByToken[tokenAddress][tokenType][user])
+            revert CreatorRewardPool__UserAlreadyExists();
+
+        s_userAllocationsByToken[tokenAddress][tokenType][user] = allocation;
+        s_usersByToken[tokenAddress][tokenType].push(user);
+        s_isUserByToken[tokenAddress][tokenType][user] = true;
+        if (allocation > 0) {
+            s_totalAllocationsByToken[tokenAddress][tokenType] += allocation;
+        }
+
+        emit UserAdded(user, tokenAddress, tokenType, allocation);
+    }
+
+    /// @notice Updates allocation for an existing user scoped to token
+    /// @param user User address
+    /// @param tokenAddress Token address (address(0) for native)
+    /// @param tokenType Token type
+    /// @param newAllocation New allocation amount
+    function updateUserAllocation(
+        address user,
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 newAllocation
+    ) external onlyFactory {
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (!s_isUserByToken[tokenAddress][tokenType][user])
+            revert CreatorRewardPool__UserNotInPool();
+
+        uint256 oldAllocation = s_userAllocationsByToken[tokenAddress][
+            tokenType
+        ][user];
+        s_totalAllocationsByToken[tokenAddress][tokenType] =
+            s_totalAllocationsByToken[tokenAddress][tokenType] -
+            oldAllocation +
+            newAllocation;
+        s_userAllocationsByToken[tokenAddress][tokenType][user] = newAllocation;
+
+        // Remove user for this token if allocation becomes 0
+        if (newAllocation == 0) {
+            s_isUserByToken[tokenAddress][tokenType][user] = false;
+        }
+
+        emit UserAllocationUpdated(
+            user,
+            tokenAddress,
+            tokenType,
+            oldAllocation,
+            newAllocation
         );
     }
 
-    /// @notice Adds a new user to the pool with custom allocation
-    /// @param user User address
-    /// @param allocation Custom allocation amount
-    function addUser(address user, uint256 allocation) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
-        if (user == address(0)) revert CreatorRewardPool__ZeroAddress();
-        if (allocation == 0) revert CreatorRewardPool__ZeroAllocation();
-        if (s_isUser[user]) revert CreatorRewardPool__UserAlreadyExists();
-
-        s_userAllocations[user] = allocation;
-        s_users.push(user);
-        s_isUser[user] = true;
-        s_totalAllocations += allocation;
-
-        emit UserAdded(user, allocation);
-    }
-
-    /// @notice Updates allocation for an existing user
-    /// @param user User address
-    /// @param newAllocation New allocation amount
-    function updateUserAllocation(address user, uint256 newAllocation) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
-        if (!s_isUser[user]) revert CreatorRewardPool__UserNotInPool();
-
-        uint256 oldAllocation = s_userAllocations[user];
-        s_totalAllocations = s_totalAllocations - oldAllocation + newAllocation;
-        s_userAllocations[user] = newAllocation;
-
-        // Remove user if allocation becomes 0
-        if (newAllocation == 0) {
-            s_isUser[user] = false;
-            // Note: We keep them in s_users array for historical tracking
-        }
-
-        emit UserAllocationUpdated(user, oldAllocation, newAllocation);
-    }
-
-    /// @notice Removes a user from the pool
+    /// @notice Removes a user from the pool for a specific token
     /// @param user User address to remove
-    function removeUser(address user) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
-        if (!s_isUser[user]) revert CreatorRewardPool__UserNotInPool();
+    /// @param tokenAddress Token address (address(0) for native)
+    /// @param tokenType Token type
+    function removeUser(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external onlyFactory {
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (!s_isUserByToken[tokenAddress][tokenType][user])
+            revert CreatorRewardPool__UserNotInPool();
 
-        uint256 allocation = s_userAllocations[user];
-        s_totalAllocations -= allocation;
-        s_userAllocations[user] = 0;
-        s_isUser[user] = false;
+        uint256 allocation = s_userAllocationsByToken[tokenAddress][tokenType][
+            user
+        ];
+        s_totalAllocationsByToken[tokenAddress][tokenType] -= allocation;
+        s_userAllocationsByToken[tokenAddress][tokenType][user] = 0;
+        s_isUserByToken[tokenAddress][tokenType][user] = false;
 
-        emit UserRemoved(user, allocation);
+        emit UserRemoved(user, tokenAddress, tokenType, allocation);
     }
 
     /// @notice Grants signer role to an address
@@ -295,26 +289,29 @@ contract CreatorRewardPool is
     function validateAllocations(
         address tokenAddress,
         TokenType tokenType
-    ) external view returns (bool isValid, uint256 totalAllocations, uint256 availableBalance) {
-        // CRITICAL: Validate tokenAddress and tokenType combination
+    )
+        external
+        view
+        returns (
+            bool isValid,
+            uint256 totalAllocations,
+            uint256 availableBalance
+        )
+    {
+        // Validate token parameters and read current balances
         if (tokenType == TokenType.NATIVE) {
             if (tokenAddress != address(0)) return (false, 0, 0);
-            availableBalance = s_nativeRewardSnapshot;
+            availableBalance = address(this).balance;
         } else if (tokenType == TokenType.ERC20) {
             if (tokenAddress == address(0)) return (false, 0, 0);
-            availableBalance = s_rewardSnapshots[tokenAddress];
+            availableBalance = IERC20(tokenAddress).balanceOf(address(this));
         } else {
             return (false, 0, 0);
         }
 
-        totalAllocations = s_totalAllocations;
+        totalAllocations = s_totalAllocationsByToken[tokenAddress][tokenType];
         isValid = totalAllocations <= availableBalance;
-        
-        if (!isValid && availableBalance > 0) {
-            // Optional: This could trigger a warning event
-            // emit AllocationValidationWarning(tokenAddress, tokenType, totalAllocations, availableBalance, "Total allocations exceed available balance");
-        }
-        
+
         return (isValid, totalAllocations, availableBalance);
     }
 
@@ -329,20 +326,22 @@ contract CreatorRewardPool is
         address user,
         address tokenAddress,
         TokenType tokenType
-    ) external view returns (bool canClaim, uint256 allocation, uint256 protocolFee) {
-        if (
-            !s_active || !s_isUser[user] || s_totalAllocations == 0 || !s_snapshotTaken
-        ) {
+    )
+        external
+        view
+        returns (bool canClaim, uint256 allocation, uint256 protocolFee)
+    {
+        if (!s_active) {
+            return (false, 0, 0);
+        }
+
+        // Must be a user for this token
+        if (!s_isUserByToken[tokenAddress][tokenType][user]) {
             return (false, 0, 0);
         }
 
         // Check if user has already claimed this token type
         if (s_hasClaimed[user][tokenAddress][tokenType]) {
-            return (false, 0, 0);
-        }
-
-        uint256 userAllocation = s_userAllocations[user];
-        if (userAllocation == 0) {
             return (false, 0, 0);
         }
 
@@ -355,34 +354,33 @@ contract CreatorRewardPool is
             return (false, 0, 0);
         }
 
-        // Get snapshot amount for this token type
-        uint256 snapshotAmount;
+        // Determine current pool balance for this token type
+        uint256 poolBalance;
         if (tokenType == TokenType.NATIVE) {
-            snapshotAmount = s_nativeRewardSnapshot;
+            poolBalance = address(this).balance;
         } else if (tokenType == TokenType.ERC20) {
-            snapshotAmount = s_rewardSnapshots[tokenAddress];
+            poolBalance = IERC20(tokenAddress).balanceOf(address(this));
         }
 
-        if (snapshotAmount == 0) {
+        if (poolBalance == 0) {
             return (false, 0, 0);
         }
 
-        // Calculate user's allocation: (userAllocation / totalAllocations) * snapshotAmount
-        allocation = (snapshotAmount * userAllocation) / s_totalAllocations;
-        
-        // Calculate protocol fee (e.g., 1% = 100 basis points)
-        protocolFee = (allocation * s_protocolFeeRate) / FEE_PRECISION;
-        
-        // Check if there are sufficient available rewards
-        uint256 availableRewards;
-        if (tokenType == TokenType.NATIVE) {
-            availableRewards = address(this).balance;
-        } else if (tokenType == TokenType.ERC20) {
-            availableRewards = IERC20(tokenAddress).balanceOf(address(this));
+        // Per-token absolute allocation only
+        if (s_totalAllocationsByToken[tokenAddress][tokenType] == 0) {
+            return (false, 0, 0);
         }
+        uint256 userAllocation = s_userAllocationsByToken[tokenAddress][
+            tokenType
+        ][user];
+        if (userAllocation == 0) return (false, 0, 0);
+        allocation = userAllocation;
 
-        // Total amount needed (user gets allocation - protocolFee, protocol gets protocolFee)
-        if (availableRewards < allocation) {
+        // Calculate protocol fee (e.g., 1% = 100 basis points, 0% = 0 basis points for no fees)
+        protocolFee = (allocation * s_protocolFeeRate) / FEE_PRECISION;
+
+        // Ensure sufficient balance for the gross allocation
+        if (poolBalance < allocation) {
             return (false, 0, 0);
         }
 
@@ -397,9 +395,11 @@ contract CreatorRewardPool is
         ClaimData calldata data,
         bytes calldata signature
     ) external nonReentrant onlyActive {
-        // Verify the user is in the pool
-        if (!s_isUser[data.user]) revert CreatorRewardPool__UserNotInPool();
-        if (data.user != msg.sender) revert CreatorRewardPool__InvalidSignature();
+        // Verify the user is in the pool for this token
+        if (!s_isUserByToken[data.tokenAddress][data.tokenType][data.user])
+            revert CreatorRewardPool__UserNotInPool();
+        if (data.user != msg.sender)
+            revert CreatorRewardPool__InvalidSignature();
 
         // CRITICAL: Validate tokenAddress and tokenType combination
         if (data.tokenType == TokenType.NATIVE) {
@@ -421,11 +421,12 @@ contract CreatorRewardPool is
         _validateSignature(data, signature);
 
         // Calculate user's reward allocation and protocol fee
-        (bool canClaim, uint256 grossAmount, uint256 protocolFee) = this.checkClaimEligibility(
-            data.user,
-            data.tokenAddress,
-            data.tokenType
-        );
+        (bool canClaim, uint256 grossAmount, uint256 protocolFee) = this
+            .checkClaimEligibility(
+                data.user,
+                data.tokenAddress,
+                data.tokenType
+            );
 
         if (!canClaim || grossAmount == 0)
             revert CreatorRewardPool__InsufficientRewards();
@@ -439,17 +440,23 @@ contract CreatorRewardPool is
 
             // Transfer net amount to user
             if (netAmount > 0) {
-                (bool success, ) = payable(data.user).call{value: netAmount}("");
+                (bool success, ) = payable(data.user).call{value: netAmount}(
+                    ""
+                );
                 if (!success) revert CreatorRewardPool__TransferFailed();
             }
 
-            // Transfer protocol fee to fee recipient
+            // Transfer protocol fee to fee recipient (only if protocol fee > 0)
             if (protocolFee > 0) {
-                (bool success, ) = payable(s_protocolFeeRecipient).call{value: protocolFee}("");
+                (bool success, ) = payable(s_protocolFeeRecipient).call{
+                    value: protocolFee
+                }("");
                 if (!success) revert CreatorRewardPool__TransferFailed();
             }
         } else if (data.tokenType == TokenType.ERC20) {
-            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(address(this));
+            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(
+                address(this)
+            );
             if (contractBalance < grossAmount)
                 revert CreatorRewardPool__InsufficientPoolBalance();
 
@@ -458,9 +465,12 @@ contract CreatorRewardPool is
                 IERC20(data.tokenAddress).transfer(data.user, netAmount);
             }
 
-            // Transfer protocol fee to fee recipient
+            // Transfer protocol fee to fee recipient (only if protocol fee > 0)
             if (protocolFee > 0) {
-                IERC20(data.tokenAddress).transfer(s_protocolFeeRecipient, protocolFee);
+                IERC20(data.tokenAddress).transfer(
+                    s_protocolFeeRecipient,
+                    protocolFee
+                );
             }
         }
 
@@ -469,7 +479,14 @@ contract CreatorRewardPool is
         s_totalClaimed[data.tokenAddress][data.tokenType] += grossAmount;
         s_protocolFeesClaimed[data.tokenAddress][data.tokenType] += protocolFee;
 
-        // Emit events
+        // Emit events using per-token allocation context only
+        uint256 eventUserAllocation = s_userAllocationsByToken[
+            data.tokenAddress
+        ][data.tokenType][data.user];
+        uint256 eventTotalAllocations = s_totalAllocationsByToken[
+            data.tokenAddress
+        ][data.tokenType];
+
         emit RewardClaimed(
             data.user,
             data.tokenAddress,
@@ -477,8 +494,117 @@ contract CreatorRewardPool is
             netAmount,
             protocolFee,
             data.tokenType,
-            s_userAllocations[data.user],
-            s_totalAllocations
+            eventUserAllocation,
+            eventTotalAllocations
+        );
+
+        // Only emit protocol fee event if there was actually a fee collected
+        if (protocolFee > 0) {
+            emit ProtocolFeeCollected(
+                data.tokenAddress,
+                protocolFee,
+                data.tokenType,
+                s_protocolFeeRecipient
+            );
+        }
+    }
+
+    /// @notice Relayed claim entrypoint to allow third-parties (e.g., factory) to claim on behalf of a user
+    /// @dev Signature + nonce enforcement remains via signer.
+    function claimRewardFor(
+        ClaimData calldata data,
+        bytes calldata signature
+    ) external nonReentrant onlyActive {
+        if (!s_isUserByToken[data.tokenAddress][data.tokenType][data.user])
+            revert CreatorRewardPool__UserNotInPool();
+
+        // Validate token parameters
+        if (data.tokenType == TokenType.NATIVE) {
+            if (data.tokenAddress != address(0))
+                revert CreatorRewardPool__InvalidTokenType();
+        } else if (data.tokenType == TokenType.ERC20) {
+            if (data.tokenAddress == address(0))
+                revert CreatorRewardPool__InvalidTokenType();
+        } else {
+            revert CreatorRewardPool__InvalidTokenType();
+        }
+
+        if (s_hasClaimed[data.user][data.tokenAddress][data.tokenType]) {
+            revert CreatorRewardPool__AlreadyClaimed();
+        }
+
+        // Verify signature and nonce
+        _validateSignature(data, signature);
+
+        // Calculate user's reward allocation and protocol fee
+        (bool canClaim, uint256 grossAmount, uint256 protocolFee) = this
+            .checkClaimEligibility(
+                data.user,
+                data.tokenAddress,
+                data.tokenType
+            );
+
+        if (!canClaim || grossAmount == 0)
+            revert CreatorRewardPool__InsufficientRewards();
+
+        uint256 netAmount = grossAmount - protocolFee;
+
+        if (data.tokenType == TokenType.NATIVE) {
+            if (address(this).balance < grossAmount)
+                revert CreatorRewardPool__InsufficientPoolBalance();
+
+            if (netAmount > 0) {
+                (bool successUser, ) = payable(data.user).call{
+                    value: netAmount
+                }("");
+                if (!successUser) revert CreatorRewardPool__TransferFailed();
+            }
+            if (protocolFee > 0) {
+                (bool successFee, ) = payable(s_protocolFeeRecipient).call{
+                    value: protocolFee
+                }("");
+                if (!successFee) revert CreatorRewardPool__TransferFailed();
+            }
+        } else {
+            uint256 contractBalance = IERC20(data.tokenAddress).balanceOf(
+                address(this)
+            );
+            if (contractBalance < grossAmount)
+                revert CreatorRewardPool__InsufficientPoolBalance();
+            if (netAmount > 0) {
+                IERC20(data.tokenAddress).transfer(data.user, netAmount);
+            }
+            if (protocolFee > 0) {
+                IERC20(data.tokenAddress).transfer(
+                    s_protocolFeeRecipient,
+                    protocolFee
+                );
+            }
+        }
+
+        // Mark as claimed and update tracking
+        s_hasClaimed[data.user][data.tokenAddress][data.tokenType] = true;
+        s_totalClaimed[data.tokenAddress][data.tokenType] += grossAmount;
+        s_protocolFeesClaimed[data.tokenAddress][data.tokenType] += protocolFee;
+
+        uint256 eventUserAllocation2;
+        uint256 eventTotalAllocations2;
+        eventUserAllocation2 = s_userAllocationsByToken[data.tokenAddress][
+            data.tokenType
+        ][data.user];
+        eventTotalAllocations2 = s_totalAllocationsByToken[data.tokenAddress][
+            data.tokenType
+        ];
+
+        emit RewardClaimed(
+            data.user,
+            data.tokenAddress,
+            grossAmount,
+            netAmount,
+            protocolFee,
+            data.tokenType,
+            eventUserAllocation2,
+            eventTotalAllocations2
         );
 
         if (protocolFee > 0) {
@@ -521,7 +647,9 @@ contract CreatorRewardPool is
             (bool success, ) = payable(to).call{value: amount}("");
             if (!success) revert CreatorRewardPool__TransferFailed();
         } else if (tokenType == TokenType.ERC20) {
-            uint256 contractBalance = IERC20(tokenAddress).balanceOf(address(this));
+            uint256 contractBalance = IERC20(tokenAddress).balanceOf(
+                address(this)
+            );
             if (contractBalance < amount) {
                 revert CreatorRewardPool__InsufficientPoolBalance();
             }
@@ -534,31 +662,39 @@ contract CreatorRewardPool is
 
     // ===== VIEW FUNCTIONS =====
 
-    /// @notice Gets user allocation
-    /// @param user User address
-    /// @return User's allocation amount
-    function getUserAllocation(address user) external view returns (uint256) {
-        return s_userAllocations[user];
+    /// @notice Gets user allocation for specific token
+    function getUserAllocationForToken(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256) {
+        return s_userAllocationsByToken[tokenAddress][tokenType][user];
     }
 
-    /// @notice Checks if user is in the pool
-    /// @param user User address
-    /// @return True if user is in the pool
-    function isUser(address user) external view returns (bool) {
-        return s_isUser[user];
+    /// @notice Checks if user is in the pool for specific token
+    function isUserForToken(
+        address user,
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (bool) {
+        return s_isUserByToken[tokenAddress][tokenType][user];
     }
 
-    /// @notice Gets total number of users
-    /// @return Total number of users in the pool
-    function getTotalUsers() external view returns (uint256) {
-        return s_users.length;
+    /// @notice Gets total number of users for specific token
+    function getTotalUsersForToken(
+        address tokenAddress,
+        TokenType tokenType
+    ) external view returns (uint256) {
+        return s_usersByToken[tokenAddress][tokenType].length;
     }
 
-    /// @notice Gets user at index
-    /// @param index User index
-    /// @return User address at the given index
-    function getUserAtIndex(uint256 index) external view returns (address) {
-        return s_users[index];
+    /// @notice Gets user at index for specific token
+    function getUserAtIndexForToken(
+        address tokenAddress,
+        TokenType tokenType,
+        uint256 index
+    ) external view returns (address) {
+        return s_usersByToken[tokenAddress][tokenType][index];
     }
 
     /// @notice Checks if a user has already claimed rewards for a specific token
@@ -596,24 +732,6 @@ contract CreatorRewardPool is
         return s_protocolFeesClaimed[tokenAddress][tokenType];
     }
 
-    /// @notice Gets the snapshot amount for a token type
-    /// @param tokenAddress Token address (use address(0) for native)
-    /// @param tokenType The token type (NATIVE or ERC20)
-    /// @return amount The snapshot amount
-    function getSnapshotAmount(
-        address tokenAddress,
-        TokenType tokenType
-    ) external view returns (uint256 amount) {
-        if (tokenType == TokenType.NATIVE) {
-            if (tokenAddress != address(0)) return 0;
-            return s_nativeRewardSnapshot;
-        } else if (tokenType == TokenType.ERC20) {
-            if (tokenAddress == address(0)) return 0;
-            return s_rewardSnapshots[tokenAddress];
-        }
-        return 0;
-    }
-
     /// @notice Gets the current available balance
     /// @param tokenAddress Token address (use address(0) for native)
     /// @param tokenType The token type (NATIVE or ERC20)
@@ -632,29 +750,14 @@ contract CreatorRewardPool is
         return 0;
     }
 
-    /// @notice Gets total rewards from snapshot + claimed amount
-    /// @param tokenAddress Token address (use address(0) for native)
-    /// @param tokenType The token type (NATIVE or ERC20)
-    /// @return total The total rewards (snapshot + claimed)
-    function getTotalRewards(
+    /// @notice Gets total allocations configured for a specific token
+    /// @param tokenAddress Token address (address(0) for native)
+    /// @param tokenType Token type
+    function getTotalAllocationsForToken(
         address tokenAddress,
         TokenType tokenType
-    ) external view returns (uint256 total) {
-        if (tokenType == TokenType.NATIVE) {
-            if (tokenAddress != address(0)) return 0;
-        } else if (tokenType == TokenType.ERC20) {
-            if (tokenAddress == address(0)) return 0;
-        } else {
-            return 0;
-        }
-
-        uint256 snapshotAmount;
-        if (tokenType == TokenType.NATIVE) {
-            snapshotAmount = s_nativeRewardSnapshot;
-        } else if (tokenType == TokenType.ERC20) {
-            snapshotAmount = s_rewardSnapshots[tokenAddress];
-        }
-        return snapshotAmount + s_totalClaimed[tokenAddress][tokenType];
+    ) external view returns (uint256) {
+        return s_totalAllocationsByToken[tokenAddress][tokenType];
     }
 
     /// @notice Gets the current nonce counter for a user
@@ -760,14 +863,15 @@ contract CreatorRewardPool is
 
     // ===== BATCH USER MANAGEMENT FUNCTIONS =====
 
-    /// @notice Adds multiple users to the pool with custom allocations in batches
-    /// @param users Array of user addresses
-    /// @param allocations Array of allocation amounts
+    /// @notice Adds multiple users to the pool with custom allocations in batches for a specific token
     function batchAddUsers(
+        address tokenAddress,
+        TokenType tokenType,
         address[] calldata users,
         uint256[] calldata allocations
     ) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
         if (users.length != allocations.length || users.length == 0)
             revert CreatorRewardPool__InvalidAllocationAmount();
 
@@ -780,10 +884,13 @@ contract CreatorRewardPool is
             uint256 allocation = allocations[i];
 
             if (user == address(0)) revert CreatorRewardPool__ZeroAddress();
-            if (allocation == 0) revert CreatorRewardPool__ZeroAllocation();
-            if (s_isUser[user]) revert CreatorRewardPool__UserAlreadyExists();
+            if (s_isUserByToken[tokenAddress][tokenType][user])
+                revert CreatorRewardPool__UserAlreadyExists();
 
-            totalAllocationsToAdd += allocation;
+            // Only count non-zero allocations into total
+            if (allocation > 0) {
+                totalAllocationsToAdd += allocation;
+            }
 
             unchecked {
                 ++i;
@@ -795,29 +902,34 @@ contract CreatorRewardPool is
             address user = users[i];
             uint256 allocation = allocations[i];
 
-            s_userAllocations[user] = allocation;
-            s_users.push(user);
-            s_isUser[user] = true;
+            s_userAllocationsByToken[tokenAddress][tokenType][
+                user
+            ] = allocation;
+            s_usersByToken[tokenAddress][tokenType].push(user);
+            s_isUserByToken[tokenAddress][tokenType][user] = true;
 
-            emit UserAdded(user, allocation);
+            emit UserAdded(user, tokenAddress, tokenType, allocation);
 
             unchecked {
                 ++i;
             }
         }
 
-        s_totalAllocations += totalAllocationsToAdd;
+        s_totalAllocationsByToken[tokenAddress][
+            tokenType
+        ] += totalAllocationsToAdd;
         emit BatchUsersAdded(users, allocations, batchSize);
     }
 
-    /// @notice Updates allocations for multiple existing users in batches
-    /// @param users Array of user addresses
-    /// @param newAllocations Array of new allocation amounts
+    /// @notice Updates allocations for multiple existing users in batches for a specific token
     function batchUpdateUserAllocations(
+        address tokenAddress,
+        TokenType tokenType,
         address[] calldata users,
         uint256[] calldata newAllocations
     ) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
         if (users.length != newAllocations.length || users.length == 0)
             revert CreatorRewardPool__InvalidAllocationAmount();
 
@@ -831,9 +943,12 @@ contract CreatorRewardPool is
             address user = users[i];
             uint256 newAllocation = newAllocations[i];
 
-            if (!s_isUser[user]) revert CreatorRewardPool__UserNotInPool();
+            if (!s_isUserByToken[tokenAddress][tokenType][user])
+                revert CreatorRewardPool__UserNotInPool();
 
-            uint256 oldAllocation = s_userAllocations[user];
+            uint256 oldAllocation = s_userAllocationsByToken[tokenAddress][
+                tokenType
+            ][user];
             oldAllocations[i] = oldAllocation;
 
             if (i == 0) {
@@ -845,19 +960,29 @@ contract CreatorRewardPool is
                 if (isIncreasing && newAllocation >= oldAllocation) {
                     totalAllocationChange += (newAllocation - oldAllocation);
                 } else if (isIncreasing && newAllocation < oldAllocation) {
-                    if (totalAllocationChange >= (oldAllocation - newAllocation)) {
-                        totalAllocationChange -= (oldAllocation - newAllocation);
+                    if (
+                        totalAllocationChange >= (oldAllocation - newAllocation)
+                    ) {
+                        totalAllocationChange -= (oldAllocation -
+                            newAllocation);
                     } else {
-                        totalAllocationChange = (oldAllocation - newAllocation) - totalAllocationChange;
+                        totalAllocationChange =
+                            (oldAllocation - newAllocation) -
+                            totalAllocationChange;
                         isIncreasing = false;
                     }
                 } else if (!isIncreasing && newAllocation <= oldAllocation) {
                     totalAllocationChange += (oldAllocation - newAllocation);
                 } else if (!isIncreasing && newAllocation > oldAllocation) {
-                    if (totalAllocationChange >= (newAllocation - oldAllocation)) {
-                        totalAllocationChange -= (newAllocation - oldAllocation);
+                    if (
+                        totalAllocationChange >= (newAllocation - oldAllocation)
+                    ) {
+                        totalAllocationChange -= (newAllocation -
+                            oldAllocation);
                     } else {
-                        totalAllocationChange = (newAllocation - oldAllocation) - totalAllocationChange;
+                        totalAllocationChange =
+                            (newAllocation - oldAllocation) -
+                            totalAllocationChange;
                         isIncreasing = true;
                     }
                 }
@@ -874,13 +999,21 @@ contract CreatorRewardPool is
             uint256 newAllocation = newAllocations[i];
             uint256 oldAllocation = oldAllocations[i];
 
-            s_userAllocations[user] = newAllocation;
+            s_userAllocationsByToken[tokenAddress][tokenType][
+                user
+            ] = newAllocation;
 
             if (newAllocation == 0) {
-                s_isUser[user] = false;
+                s_isUserByToken[tokenAddress][tokenType][user] = false;
             }
 
-            emit UserAllocationUpdated(user, oldAllocation, newAllocation);
+            emit UserAllocationUpdated(
+                user,
+                tokenAddress,
+                tokenType,
+                oldAllocation,
+                newAllocation
+            );
 
             unchecked {
                 ++i;
@@ -889,21 +1022,37 @@ contract CreatorRewardPool is
 
         // Update total allocations
         if (isIncreasing) {
-            s_totalAllocations += totalAllocationChange;
+            s_totalAllocationsByToken[tokenAddress][
+                tokenType
+            ] += totalAllocationChange;
         } else {
-            s_totalAllocations = s_totalAllocations >= totalAllocationChange
-                ? s_totalAllocations - totalAllocationChange
+            uint256 currentTotal = s_totalAllocationsByToken[tokenAddress][
+                tokenType
+            ];
+            s_totalAllocationsByToken[tokenAddress][tokenType] = currentTotal >=
+                totalAllocationChange
+                ? currentTotal - totalAllocationChange
                 : 0;
         }
 
-        emit BatchUsersUpdated(users, oldAllocations, newAllocations, batchSize);
+        emit BatchUsersUpdated(
+            users,
+            oldAllocations,
+            newAllocations,
+            batchSize
+        );
     }
 
-    /// @notice Removes multiple users from the pool in batches
-    /// @param users Array of user addresses to remove
-    function batchRemoveUsers(address[] calldata users) external onlyFactory {
-        if (s_active) revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
-        if (users.length == 0) revert CreatorRewardPool__InvalidAllocationAmount();
+    /// @notice Removes multiple users from the pool in batches for a specific token
+    function batchRemoveUsers(
+        address tokenAddress,
+        TokenType tokenType,
+        address[] calldata users
+    ) external onlyFactory {
+        if (s_active)
+            revert CreatorRewardPool__CannotUpdateAllocationsWhenActive();
+        if (users.length == 0)
+            revert CreatorRewardPool__InvalidAllocationAmount();
 
         uint256 batchSize = users.length;
         uint256[] memory allocations = new uint256[](batchSize);
@@ -912,9 +1061,12 @@ contract CreatorRewardPool is
         // First pass: validate and calculate total allocations to remove
         for (uint256 i = 0; i < batchSize; ) {
             address user = users[i];
-            if (!s_isUser[user]) revert CreatorRewardPool__UserNotInPool();
+            if (!s_isUserByToken[tokenAddress][tokenType][user])
+                revert CreatorRewardPool__UserNotInPool();
 
-            uint256 allocation = s_userAllocations[user];
+            uint256 allocation = s_userAllocationsByToken[tokenAddress][
+                tokenType
+            ][user];
             allocations[i] = allocation;
             totalAllocationsToRemove += allocation;
 
@@ -928,17 +1080,19 @@ contract CreatorRewardPool is
             address user = users[i];
             uint256 allocation = allocations[i];
 
-            s_userAllocations[user] = 0;
-            s_isUser[user] = false;
+            s_userAllocationsByToken[tokenAddress][tokenType][user] = 0;
+            s_isUserByToken[tokenAddress][tokenType][user] = false;
 
-            emit UserRemoved(user, allocation);
+            emit UserRemoved(user, tokenAddress, tokenType, allocation);
 
             unchecked {
                 ++i;
             }
         }
 
-        s_totalAllocations -= totalAllocationsToRemove;
+        s_totalAllocationsByToken[tokenAddress][
+            tokenType
+        ] -= totalAllocationsToRemove;
         emit BatchUsersRemoved(users, allocations, batchSize);
     }
-} 
+}

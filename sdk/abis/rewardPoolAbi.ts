@@ -212,6 +212,30 @@ export const rewardpoolAbi = [
   },
   {
     type: "function",
+    name: "claimRewardFor",
+    inputs: [
+      {
+        name: "data",
+        type: "tuple",
+        internalType: "struct IRewardPool.ClaimData",
+        components: [
+          { name: "user", type: "address", internalType: "address" },
+          { name: "nonce", type: "uint256", internalType: "uint256" },
+          { name: "tokenAddress", type: "address", internalType: "address" },
+          {
+            name: "tokenType",
+            type: "uint8",
+            internalType: "enum IRewardPool.TokenType",
+          },
+        ],
+      },
+      { name: "signature", type: "bytes", internalType: "bytes" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "eip712Domain",
     inputs: [],
     outputs: [
@@ -1195,7 +1219,19 @@ export const rewardpoolAbi = [
         internalType: "address",
       },
       {
-        name: "amount",
+        name: "grossAmount",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "netAmount",
+        type: "uint256",
+        indexed: false,
+        internalType: "uint256",
+      },
+      {
+        name: "protocolFee",
         type: "uint256",
         indexed: false,
         internalType: "uint256",
@@ -1207,13 +1243,13 @@ export const rewardpoolAbi = [
         internalType: "enum IRewardPool.TokenType",
       },
       {
-        name: "userXP",
+        name: "userShares",
         type: "uint256",
         indexed: false,
         internalType: "uint256",
       },
       {
-        name: "totalXP",
+        name: "totalShares",
         type: "uint256",
         indexed: false,
         internalType: "uint256",
