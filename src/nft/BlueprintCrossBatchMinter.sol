@@ -13,6 +13,7 @@ import "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 import "./BlueprintERC1155Factory.sol";
@@ -54,7 +55,8 @@ contract BlueprintCrossBatchMinter is
     Initializable,
     AccessControlUpgradeable,
     UUPSUpgradeable,
-    ReentrancyGuardUpgradeable
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable
 {
     using SafeERC20 for IERC20;
 
@@ -83,9 +85,20 @@ contract BlueprintCrossBatchMinter is
     error BlueprintCrossBatchMinter__ETHNotEnabled();
     error BlueprintCrossBatchMinter__ERC20NotEnabled();
     error BlueprintCrossBatchMinter__InvalidERC20Address();
+    error BlueprintCrossBatchMinter__ZeroAdminAddress();
+    error BlueprintCrossBatchMinter__NoStuckETH();
+    error BlueprintCrossBatchMinter__NoStuckERC20();
+    error BlueprintCrossBatchMinter__WithdrawFailed();
+    error BlueprintCrossBatchMinter__ArrayTooLarge(uint256 length, uint256 maxLength);
 
     // ===== ROLES =====
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    // ===== CONSTANTS =====
+    /// @notice Maximum number of items in a batch to prevent DoS
+    uint256 public constant MAX_BATCH_SIZE = 100;
+    /// @notice Maximum number of ERC20 tokens to check per batch to prevent DoS
+    uint256 public constant MAX_ERC20_TOKENS = 20;
 
     // ===== STRUCTS =====
     struct BatchMintItem {
@@ -156,7 +169,8 @@ contract BlueprintCrossBatchMinter is
         uint256 totalCollections,
         uint256 totalItems,
         uint256 totalETHPaid,
-        ERC20Requirement[] erc20Payments
+        ERC20Requirement[] erc20Payments,
+        address referrer
     );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -170,13 +184,18 @@ contract BlueprintCrossBatchMinter is
      * @param _admin Admin address with full control
      */
     function initialize(address _factory, address _admin) public initializer {
-        __AccessControl_init();
-        __UUPSUpgradeable_init();
-        __ReentrancyGuard_init();
-
+        // Validate critical addresses
+        if (_admin == address(0)) {
+            revert BlueprintCrossBatchMinter__ZeroAdminAddress();
+        }
         if (_factory == address(0)) {
             revert BlueprintCrossBatchMinter__InvalidFactory();
         }
+
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
+        __Pausable_init();
 
         factory = BlueprintERC1155Factory(_factory);
 
@@ -190,7 +209,10 @@ contract BlueprintCrossBatchMinter is
      */
     function _authorizeUpgrade(
         address newImplementation
-    ) internal override onlyRole(UPGRADER_ROLE) {}
+    ) internal view override onlyRole(UPGRADER_ROLE) {
+        // Ensure new implementation is a valid contract
+        require(newImplementation.code.length > 0, "Invalid implementation");
+    }
 
     /**
      * @dev Updates the factory address (admin only)
@@ -217,9 +239,13 @@ contract BlueprintCrossBatchMinter is
         address to,
         BatchMintItem[] calldata items,
         address referrer
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         if (items.length == 0) {
             revert BlueprintCrossBatchMinter__InvalidArrayLength();
+        }
+        // Validate array length to prevent DoS
+        if (items.length > MAX_BATCH_SIZE) {
+            revert BlueprintCrossBatchMinter__ArrayTooLarge(items.length, MAX_BATCH_SIZE);
         }
 
         // Analyze payment requirements and validate all items
@@ -293,9 +319,16 @@ contract BlueprintCrossBatchMinter is
         BatchMintItem[] calldata items,
         address[] calldata erc20Tokens,
         address referrer
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         if (items.length == 0) {
             revert BlueprintCrossBatchMinter__InvalidArrayLength();
+        }
+        // Validate array lengths to prevent DoS
+        if (items.length > MAX_BATCH_SIZE) {
+            revert BlueprintCrossBatchMinter__ArrayTooLarge(items.length, MAX_BATCH_SIZE);
+        }
+        if (erc20Tokens.length > MAX_ERC20_TOKENS) {
+            revert BlueprintCrossBatchMinter__ArrayTooLarge(erc20Tokens.length, MAX_ERC20_TOKENS);
         }
 
         // Determine user's payment preference based on msg.value
@@ -368,7 +401,8 @@ contract BlueprintCrossBatchMinter is
             collectionData.length,
             items.length,
             paymentInfo.totalETHRequired,
-            paymentInfo.erc20Requirements
+            paymentInfo.erc20Requirements,
+            referrer
         );
     }
 
@@ -423,9 +457,9 @@ contract BlueprintCrossBatchMinter is
 
             BlueprintERC1155 collection = BlueprintERC1155(item.collection);
 
-            // Get drop information
+            // Get drop information (ethPrice not used here - payment calculated via getETHPaymentInfo)
             (
-                uint256 ethPrice,
+                ,
                 uint256 startTime,
                 uint256 endTime,
                 bool active
@@ -442,13 +476,14 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Calculate ETH payment
-            // Only count as ETH payment if ethPrice > 0
-            if (ethPrice > 0) {
-                info.totalETHRequired += ethPrice * item.amount;
+            // Calculate ETH payment using helper function that accounts for protocol fees
+            // ETH is available if ethPrice > 0 OR if it's a free mint (protocolFeeETH applies)
+            uint256 ethPaymentRequired = collection.getETHPaymentInfo(item.tokenId, item.amount);
+            if (ethPaymentRequired > 0) {
+                info.totalETHRequired += ethPaymentRequired;
                 info.hasETHPayments = true;
             } else {
-                // ethPrice == 0 indicates this might be an ERC20-only drop
+                // No ETH payment possible - this is an ERC20-only drop
                 // Flag as ERC20 payment to detect mixed payment scenarios
                 info.hasERC20Payments = true;
             }
@@ -517,15 +552,14 @@ contract BlueprintCrossBatchMinter is
                     tokenIds[currentIndex] = items[j].tokenId;
                     amounts[currentIndex] = items[j].amount;
 
-                    // Calculate ETH payment for this item
+                    // Calculate ETH payment for this item using helper that accounts for protocol fees
                     BlueprintERC1155 collectionContract = BlueprintERC1155(
                         collection
                     );
-                    (uint256 ethPrice, , , ) = collectionContract.drops(
-                        items[j].tokenId
+                    ethPayment += collectionContract.getETHPaymentInfo(
+                        items[j].tokenId,
+                        items[j].amount
                     );
-
-                    ethPayment += ethPrice * items[j].amount;
 
                     currentIndex++;
                 }
@@ -680,64 +714,73 @@ contract BlueprintCrossBatchMinter is
                 revert BlueprintCrossBatchMinter__DropEnded();
             }
 
-            // Determine payment method for this drop
-            // ETH is only available if ethPrice > 0
-            bool canUseETH = ethPrice > 0;
+            // Get ETH payment info for potential use
+            uint256 ethPaymentAmount = collection.getETHPaymentInfo(item.tokenId, item.amount);
 
-            // Find accepted ERC20 price from mapping
+            // Find accepted ERC20 from enabled tokens
             // Use deterministic selection (lowest address) to avoid order-dependency
-            uint256 currentErc20Price = 0;
+            uint256 currentErc20Payment = 0;
             address currentErc20Token = address(0);
             for (uint256 k = 0; k < erc20Tokens.length; k++) {
-                uint256 priceFromMapping = collection.erc20Prices(
-                    item.tokenId,
-                    erc20Tokens[k]
-                );
-                if (priceFromMapping > 0) {
+                // Check if ERC20 is enabled (not just price > 0, as free mints have price = 0)
+                if (collection.isERC20Enabled(item.tokenId, erc20Tokens[k])) {
+                    // Get the actual payment amount (includes protocol fees for free mints)
+                    uint256 paymentAmount = collection.getERC20PaymentInfo(
+                        item.tokenId,
+                        erc20Tokens[k],
+                        item.amount
+                    );
                     // Use the token with the lowest address for deterministic selection
                     if (
                         currentErc20Token == address(0) ||
                         erc20Tokens[k] < currentErc20Token
                     ) {
-                        currentErc20Price = priceFromMapping;
+                        currentErc20Payment = paymentAmount;
                         currentErc20Token = erc20Tokens[k];
                     }
                 }
             }
-            bool canUseERC20 = currentErc20Token != address(0) &&
-                currentErc20Price > 0;
+            bool canUseERC20 = currentErc20Token != address(0);
 
-            // Determine payment method based on availability and user preference
+            // Determine if ETH is technically available (has protocol fee or price)
+            // This is separate from whether we SHOULD use ETH (handled in shouldUseETH logic)
+            bool canUseETH = ethPaymentAmount > 0;
+
+            // Determine payment method based on availability and drop configuration
             bool shouldUseETH;
             if (canUseETH && canUseERC20) {
-                // Both available - use user's preference
-                shouldUseETH = preferETH;
+                // Both technically available
+                if (ethPrice == 0) {
+                    // ethPrice=0 means no explicit ETH pricing for this drop
+                    // Use ERC20 since user provided a matching token
+                    // This makes mixed batches work correctly: ETH for ETH-only drops,
+                    // ERC20 for ERC20-enabled drops
+                    shouldUseETH = false;
+                } else {
+                    // ETH has explicit price - this is a true dual-payment drop
+                    // Respect user preference
+                    shouldUseETH = preferETH;
+                }
             } else if (canUseETH) {
-                // Only ETH available
+                // Only ETH available - use it
                 shouldUseETH = true;
             } else if (canUseERC20) {
                 // Only ERC20 available
                 shouldUseETH = false;
             } else {
-                // Neither available - check if user provided ERC20 tokens but they don't match
-                if (erc20Tokens.length > 0) {
-                    // User provided ERC20 tokens but none match this drop's configured tokens
-                    revert BlueprintCrossBatchMinter__InvalidERC20Address();
-                }
-                // No valid payment method (ethPrice = 0 and no ERC20 configured)
+                // Neither available - this shouldn't happen for active drops
+                // (active drops have either ETH protocol fee or ERC20 configured)
                 revert BlueprintCrossBatchMinter__DropNotActive();
             }
 
             if (shouldUseETH) {
-                info.totalETHRequired += ethPrice * item.amount;
+                info.totalETHRequired += ethPaymentAmount;
             } else {
                 // Find the ERC20 token in our requirements array
                 bool found = false;
                 for (uint256 j = 0; j < info.erc20Requirements.length; j++) {
                     if (info.erc20Requirements[j].token == currentErc20Token) {
-                        info.erc20Requirements[j].amount +=
-                            currentErc20Price *
-                            item.amount;
+                        info.erc20Requirements[j].amount += currentErc20Payment;
                         found = true;
                         break;
                     }
@@ -805,21 +848,18 @@ contract BlueprintCrossBatchMinter is
         bool preferETH
     ) internal view returns (address) {
         BlueprintERC1155 collection = BlueprintERC1155(item.collection);
-        (uint256 ethPrice, , , ) = collection.drops(item.tokenId);
 
-        // Check if ETH is available
-        bool canUseETH = ethPrice > 0;
+        // Get drop info to check ethPrice
+        (uint256 ethPrice, , , ) = collection.drops(item.tokenId);
+        uint256 ethPayment = collection.getETHPaymentInfo(item.tokenId, item.amount);
 
         // Check for ERC20 with deterministic selection (lowest address)
+        // Use isERC20Enabled instead of price > 0 to support free ERC20 mints
         address erc20Token = address(0);
         {
             // Scope to avoid stack depth
             for (uint256 k = 0; k < erc20Tokens.length; k++) {
-                uint256 price = collection.erc20Prices(
-                    item.tokenId,
-                    erc20Tokens[k]
-                );
-                if (price > 0) {
+                if (collection.isERC20Enabled(item.tokenId, erc20Tokens[k])) {
                     // Use the token with the lowest address for deterministic selection
                     if (
                         erc20Token == address(0) || erc20Tokens[k] < erc20Token
@@ -832,17 +872,28 @@ contract BlueprintCrossBatchMinter is
 
         bool canUseERC20 = erc20Token != address(0);
 
-        // Determine payment method based on preference
+        // Determine if ETH is technically available (has protocol fee or price)
+        bool canUseETH = ethPayment > 0;
+
+        // Determine payment method based on availability and drop configuration
         if (canUseETH && canUseERC20) {
-            return preferETH ? address(0) : erc20Token;
+            // Both technically available
+            if (ethPrice == 0) {
+                // ethPrice=0 means no explicit ETH pricing for this drop
+                // Use ERC20 since user provided a matching token
+                return erc20Token;
+            } else {
+                // ETH has explicit price - respect user preference
+                return preferETH ? address(0) : erc20Token;
+            }
         } else if (canUseETH) {
+            // Only ETH available - use it
             return address(0);
         } else if (canUseERC20) {
+            // Only ERC20 available
             return erc20Token;
         } else {
-            if (erc20Tokens.length > 0) {
-                revert BlueprintCrossBatchMinter__InvalidERC20Address();
-            }
+            // Neither available - this shouldn't happen for active drops
             revert BlueprintCrossBatchMinter__DropNotActive();
         }
     }
@@ -940,22 +991,24 @@ contract BlueprintCrossBatchMinter is
                     groups[g].tokenIds[idx] = items[i].tokenId;
                     groups[g].amounts[idx] = items[i].amount;
 
-                    // Calculate payment
+                    // Calculate payment using helper functions that account for protocol fees
                     BlueprintERC1155 ctr = BlueprintERC1155(
                         items[i].collection
                     );
 
                     if (groups[g].erc20Token == address(0)) {
-                        // ETH payment
-                        (uint256 ethPrice, , , ) = ctr.drops(items[i].tokenId);
-                        groups[g].ethPayment += ethPrice * items[i].amount;
-                    } else {
-                        // ERC20 payment
-                        uint256 price = ctr.erc20Prices(
+                        // ETH payment (includes protocol fee for free mints)
+                        groups[g].ethPayment += ctr.getETHPaymentInfo(
                             items[i].tokenId,
-                            groups[g].erc20Token
+                            items[i].amount
                         );
-                        groups[g].erc20Payment += price * items[i].amount;
+                    } else {
+                        // ERC20 payment (includes protocol fee for free mints)
+                        groups[g].erc20Payment += ctr.getERC20PaymentInfo(
+                            items[i].tokenId,
+                            groups[g].erc20Token,
+                            items[i].amount
+                        );
                     }
 
                     idx++;
@@ -981,25 +1034,29 @@ contract BlueprintCrossBatchMinter is
             MixedCollectionData memory data = collectionData[i];
             BlueprintERC1155 collection = BlueprintERC1155(data.collection);
 
-            if (data.ethPayment > 0) {
-                // Use ETH payment with referrer
+            if (data.erc20Token == address(0)) {
+                // Use ETH payment with referrer (includes free mints with protocol fee)
                 collection.batchMint{value: data.ethPayment}(
                     to,
                     data.tokenIds,
                     data.amounts,
                     referrer
                 );
-            } else if (data.erc20Payment > 0 && data.erc20Token != address(0)) {
-                // Use ERC20 payment
+            } else {
+                // Use ERC20 payment (includes free mints with protocol fee or truly free mints)
                 IERC20 token = IERC20(data.erc20Token);
-                token.safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    data.erc20Payment
-                );
 
-                // Approve the collection to spend tokens
-                token.forceApprove(data.collection, data.erc20Payment);
+                // Only transfer if there's an amount to transfer
+                if (data.erc20Payment > 0) {
+                    token.safeTransferFrom(
+                        msg.sender,
+                        address(this),
+                        data.erc20Payment
+                    );
+
+                    // Approve the collection to spend tokens
+                    token.forceApprove(data.collection, data.erc20Payment);
+                }
 
                 // Call batch ERC20 mint with referrer
                 // Let any errors (insufficient funds, access control, etc.) bubble up naturally
@@ -1011,8 +1068,10 @@ contract BlueprintCrossBatchMinter is
                     referrer
                 );
 
-                // Reset approval for security
-                token.forceApprove(data.collection, 0);
+                // Reset approval for security (only if we approved something)
+                if (data.erc20Payment > 0) {
+                    token.forceApprove(data.collection, 0);
+                }
             }
 
             // Emit events for each item processed
@@ -1060,4 +1119,62 @@ contract BlueprintCrossBatchMinter is
 
         return (info.totalETHRequired, info.erc20Requirements);
     }
+
+    // ===== PAUSE FUNCTIONALITY =====
+
+    /**
+     * @dev Pauses the contract, preventing all minting operations
+     * Only callable by admin
+     */
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses the contract, allowing minting operations
+     * Only callable by admin
+     */
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
+    }
+
+    // ===== EMERGENCY RECOVERY =====
+
+    /**
+     * @dev Withdraws any stuck ETH from the contract
+     * This can happen if minting reverts after ETH was received
+     * @param to Address to send the stuck ETH to
+     */
+    function withdrawStuckETH(address to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 balance = address(this).balance;
+        if (balance == 0) {
+            revert BlueprintCrossBatchMinter__NoStuckETH();
+        }
+        (bool success, ) = to.call{value: balance}("");
+        if (!success) {
+            revert BlueprintCrossBatchMinter__WithdrawFailed();
+        }
+    }
+
+    /**
+     * @dev Withdraws any stuck ERC20 tokens from the contract
+     * This can happen if minting reverts after ERC20 was transferred
+     * @param token Address of the ERC20 token
+     * @param to Address to send the stuck tokens to
+     */
+    function withdrawStuckERC20(address token, address to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        IERC20 erc20 = IERC20(token);
+        uint256 balance = erc20.balanceOf(address(this));
+        if (balance == 0) {
+            revert BlueprintCrossBatchMinter__NoStuckERC20();
+        }
+        erc20.safeTransfer(to, balance);
+    }
+
+    // ===== STORAGE GAP =====
+    /**
+     * @dev Reserved storage space for future upgrades
+     * This allows adding new state variables without affecting storage layout
+     */
+    uint256[50] private __gap;
 }

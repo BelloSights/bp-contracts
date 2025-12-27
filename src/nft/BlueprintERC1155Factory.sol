@@ -12,6 +12,7 @@ pragma solidity 0.8.28;
 import "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts/proxy/Clones.sol";
 import "./BlueprintERC1155.sol";
 
@@ -25,15 +26,22 @@ import "./BlueprintERC1155.sol";
 contract BlueprintERC1155Factory is
     Initializable,
     AccessControlUpgradeable,
-    UUPSUpgradeable
+    UUPSUpgradeable,
+    PausableUpgradeable
 {
     // ===== ERRORS =====
     error BlueprintERC1155Factory__NotDeployedCollection(address collection);
     error BlueprintERC1155Factory__ZeroBlueprintRecipient();
     error BlueprintERC1155Factory__ZeroCreatorRecipient();
+    error BlueprintERC1155Factory__ZeroAdminAddress();
+    error BlueprintERC1155Factory__ZeroImplementation();
+    error BlueprintERC1155Factory__InvalidBasisPoints(uint256 total);
 
     // Roles
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    /// @notice Maximum basis points (100% = 10000)
+    uint256 public constant BASIS_POINTS_DENOMINATOR = 10000;
 
     // State variables
     address public implementation;
@@ -97,8 +105,27 @@ contract BlueprintERC1155Factory is
         uint256 _defaultRewardPoolBasisPoints,
         address _admin
     ) public initializer {
+        // Validate critical addresses
+        if (_admin == address(0)) {
+            revert BlueprintERC1155Factory__ZeroAdminAddress();
+        }
+        if (_implementation == address(0)) {
+            revert BlueprintERC1155Factory__ZeroImplementation();
+        }
+        if (_defaultBlueprintRecipient == address(0)) {
+            revert BlueprintERC1155Factory__ZeroBlueprintRecipient();
+        }
+
+        // Validate basis points don't exceed 100%
+        // Note: creatorBasisPoints is set per collection, so we validate fee + reward pool here
+        uint256 totalBasisPoints = _defaultFeeBasisPoints + _defaultRewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155Factory__InvalidBasisPoints(totalBasisPoints);
+        }
+
         __AccessControl_init();
         __UUPSUpgradeable_init();
+        __Pausable_init();
 
         implementation = _implementation;
         defaultBlueprintRecipient = _defaultBlueprintRecipient;
@@ -118,7 +145,10 @@ contract BlueprintERC1155Factory is
      */
     function _authorizeUpgrade(
         address newImplementation
-    ) internal override onlyRole(UPGRADER_ROLE) {}
+    ) internal view override onlyRole(UPGRADER_ROLE) {
+        // Ensure new implementation is a valid contract
+        require(newImplementation.code.length > 0, "Invalid implementation");
+    }
 
     /**
      * @dev Updates the implementation contract
@@ -127,6 +157,9 @@ contract BlueprintERC1155Factory is
     function setImplementation(
         address _implementation
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_implementation == address(0)) {
+            revert BlueprintERC1155Factory__ZeroImplementation();
+        }
         implementation = _implementation;
     }
 
@@ -141,13 +174,19 @@ contract BlueprintERC1155Factory is
         string memory uri,
         address creatorRecipient,
         uint256 creatorBasisPoints
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (address) {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) whenNotPaused returns (address) {
         // Validate essential recipients
         if (defaultBlueprintRecipient == address(0)) {
             revert BlueprintERC1155Factory__ZeroBlueprintRecipient();
         }
         if (creatorRecipient == address(0)) {
             revert BlueprintERC1155Factory__ZeroCreatorRecipient();
+        }
+
+        // Validate total basis points won't exceed 100%
+        uint256 totalBasisPoints = defaultFeeBasisPoints + creatorBasisPoints + defaultRewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155Factory__InvalidBasisPoints(totalBasisPoints);
         }
 
         address clone = Clones.clone(implementation);
@@ -189,6 +228,12 @@ contract BlueprintERC1155Factory is
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_defaultBlueprintRecipient == address(0)) {
             revert BlueprintERC1155Factory__ZeroBlueprintRecipient();
+        }
+
+        // Validate basis points don't exceed 100%
+        uint256 totalBasisPoints = _defaultFeeBasisPoints + _defaultRewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155Factory__InvalidBasisPoints(totalBasisPoints);
         }
 
         defaultBlueprintRecipient = _defaultBlueprintRecipient;
@@ -678,6 +723,12 @@ contract BlueprintERC1155Factory is
             revert BlueprintERC1155Factory__ZeroCreatorRecipient();
         }
 
+        // Validate total basis points don't exceed 100%
+        uint256 totalBasisPoints = blueprintFeeBasisPoints + creatorBasisPoints + rewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155Factory__InvalidBasisPoints(totalBasisPoints);
+        }
+
         BlueprintERC1155(collection).setFeeConfig(
             blueprintRecipient,
             blueprintFeeBasisPoints,
@@ -724,6 +775,12 @@ contract BlueprintERC1155Factory is
 
         if (creator == address(0)) {
             revert BlueprintERC1155Factory__ZeroCreatorRecipient();
+        }
+
+        // Validate total basis points don't exceed 100%
+        uint256 totalBasisPoints = blueprintFeeBasisPoints + creatorBasisPoints + rewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155Factory__InvalidBasisPoints(totalBasisPoints);
         }
 
         BlueprintERC1155(collection).setTokenFeeConfig(
@@ -852,4 +909,29 @@ contract BlueprintERC1155Factory is
     ) public view override(AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
+
+    // ===== PAUSE FUNCTIONALITY =====
+
+    /**
+     * @dev Pauses the factory, preventing new collection creation
+     * Only callable by admin
+     */
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses the factory, allowing new collection creation
+     * Only callable by admin
+     */
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
+    }
+
+    // ===== STORAGE GAP =====
+    /**
+     * @dev Reserved storage space for future upgrades
+     * This allows adding new state variables without affecting storage layout
+     */
+    uint256[50] private __gap;
 }

@@ -238,7 +238,13 @@ contract BlueprintERC1155FactoryTest is Test {
         vm.startPrank(admin);
 
         // Set high basis points (more than 100% combined)
-        // Note: The contract doesn't validate that basis points add up to at most 100%
+        // This should revert because total basis points (70% + 70% + 20% = 160%) exceeds 100%
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BlueprintERC1155Factory.BlueprintERC1155Factory__InvalidBasisPoints.selector,
+                16000 // 160% in basis points
+            )
+        );
         factory.updateFeeConfig(
             collection,
             blueprintRecipient, // Non-zero address for blueprint recipient
@@ -249,23 +255,6 @@ contract BlueprintERC1155FactoryTest is Test {
             2000, // 20%
             treasury
         );
-
-        // Verify the fee configuration was updated successfully
-        BlueprintERC1155 collectionContract = BlueprintERC1155(collection);
-        (
-            ,
-            uint256 updatedBlueprintBasisPoints,
-            ,
-            uint256 updatedCreatorBasisPoints,
-            ,
-            uint256 updatedRewardPoolBasisPoints,
-
-        ) = collectionContract.defaultFeeConfig();
-
-        // Verify values were set correctly
-        assertEq(updatedBlueprintBasisPoints, 7000);
-        assertEq(updatedCreatorBasisPoints, 7000);
-        assertEq(updatedRewardPoolBasisPoints, 2000);
 
         vm.stopPrank();
     }

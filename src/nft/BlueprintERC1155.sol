@@ -14,6 +14,7 @@ import "@openzeppelin-contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin-contracts-upgradeable/utils/StringsUpgradeable.sol";
 import "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
@@ -29,7 +30,8 @@ contract BlueprintERC1155 is
     ERC1155Upgradeable,
     AccessControlUpgradeable,
     UUPSUpgradeable,
-    ReentrancyGuardUpgradeable
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable
 {
     using StringsUpgradeable for uint256;
     using SafeERC20 for IERC20;
@@ -63,9 +65,23 @@ contract BlueprintERC1155 is
         uint256 required,
         uint256 balance
     );
+    error BlueprintERC1155__InvalidBasisPoints(uint256 total);
+    error BlueprintERC1155__ZeroAdminAddress();
+    error BlueprintERC1155__NoStuckETH();
+    error BlueprintERC1155__NoStuckERC20();
+    error BlueprintERC1155__WithdrawFailed();
+    error BlueprintERC1155__ZeroRecipientAddress();
+    error BlueprintERC1155__ExceedsMaxMintAmount(uint256 requested, uint256 max);
+
     bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
     bytes32 public constant CREATOR_ROLE = keccak256("CREATOR_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    /// @notice Maximum mint amount per transaction to prevent overflow in fee calculations
+    uint256 public constant MAX_MINT_AMOUNT = 10000;
+
+    /// @notice Maximum basis points (100% = 10000)
+    uint256 public constant BASIS_POINTS_DENOMINATOR = 10000;
 
     struct Drop {
         uint256 price; // ETH price in wei (0 = free mint with protocol fee)
@@ -246,18 +262,33 @@ contract BlueprintERC1155 is
         uint256 _rewardPoolBasisPoints,
         address _treasury
     ) public initializer {
+        // Validate critical addresses
+        if (_admin == address(0)) {
+            revert BlueprintERC1155__ZeroAdminAddress();
+        }
+        if (_blueprintRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroBlueprintRecipient();
+        }
+        if (_creatorRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroCreatorRecipient();
+        }
+
+        // Validate total basis points don't exceed 100%
+        uint256 totalBasisPoints = _feeBasisPoints + _creatorBasisPoints + _rewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155__InvalidBasisPoints(totalBasisPoints);
+        }
+
         __ERC1155_init(_uri);
         __AccessControl_init();
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
+        __Pausable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(FACTORY_ROLE, _admin);
         _grantRole(UPGRADER_ROLE, _admin);
-
-        if (_creatorRecipient != address(0)) {
-            _grantRole(CREATOR_ROLE, _creatorRecipient);
-        }
+        _grantRole(CREATOR_ROLE, _creatorRecipient);
 
         // Initialize nextTokenId to 0
         nextTokenId = 0;
@@ -379,15 +410,20 @@ contract BlueprintERC1155 is
      */
     function _authorizeUpgrade(
         address newImplementation
-    ) internal override onlyRole(UPGRADER_ROLE) {}
+    ) internal view override onlyRole(UPGRADER_ROLE) {
+        // Ensure new implementation is a valid contract
+        require(newImplementation.code.length > 0, "Invalid implementation");
+    }
 
     /**
      * @dev Creates a new drop with auto-incrementing token ID - only callable by factory
      * @param price The mint price in wei
      * @param startTime The timestamp when minting becomes available
-     * @param endTime The timestamp when minting ends
+     * @param endTime The timestamp when minting ends (set to 0 for infinite/no-end drops)
      * @param active Whether the drop is active and mintable
      * @return tokenId The assigned token ID for the new drop
+     * @notice When endTime is set to 0, the drop will never expire and minting remains open
+     *         indefinitely as long as the drop is active. This is useful for open editions.
      */
     function createDrop(
         uint256 price,
@@ -419,10 +455,11 @@ contract BlueprintERC1155 is
      * @param erc20Token ERC20 token address (address(0) to skip ERC20 setup)
      * @param erc20Price The ERC20 mint price in token units
      * @param startTime The timestamp when minting becomes available
-     * @param endTime The timestamp when minting ends
+     * @param endTime The timestamp when minting ends (set to 0 for infinite/no-end drops)
      * @param active Whether the drop is active and mintable
      * @return tokenId The assigned token ID for the new drop
-     * @notice ETH is always enabled. To add more ERC20 tokens, call setERC20Price after creation
+     * @notice ETH is always enabled. To add more ERC20 tokens, call setERC20Price after creation.
+     *         When endTime is set to 0, the drop will never expire (useful for open editions).
      */
     function createDropWithERC20(
         uint256 price,
@@ -462,8 +499,9 @@ contract BlueprintERC1155 is
      * @param tokenId The token ID for the drop
      * @param price The mint price in wei
      * @param startTime The timestamp when minting becomes available
-     * @param endTime The timestamp when minting ends
+     * @param endTime The timestamp when minting ends (set to 0 for infinite/no-end drops)
      * @param active Whether the drop is active and mintable
+     * @notice When endTime is set to 0, the drop will never expire (useful for open editions).
      */
     function setDrop(
         uint256 tokenId,
@@ -498,9 +536,10 @@ contract BlueprintERC1155 is
      * @param erc20Token ERC20 token address (address(0) to skip ERC20 setup)
      * @param erc20Price The ERC20 mint price in token units
      * @param startTime The timestamp when minting becomes available
-     * @param endTime The timestamp when minting ends
+     * @param endTime The timestamp when minting ends (set to 0 for infinite/no-end drops)
      * @param active Whether the drop is active and mintable
-     * @notice ETH is always enabled. To add more ERC20 tokens, call setERC20Price separately
+     * @notice ETH is always enabled. To add more ERC20 tokens, call setERC20Price separately.
+     *         When endTime is set to 0, the drop will never expire (useful for open editions).
      */
     function setDropWithERC20(
         uint256 tokenId,
@@ -577,14 +616,15 @@ contract BlueprintERC1155 is
      * @dev Allows creator to update start and end times only
      * @param tokenId The token ID for the drop
      * @param startTime The new start time
-     * @param endTime The new end time
+     * @param endTime The new end time (set to 0 for infinite/no-end drops)
+     * @notice When endTime is set to 0, the drop will never expire (useful for open editions).
      */
     function updateDropTimes(
         uint256 tokenId,
         uint256 startTime,
         uint256 endTime
     ) external onlyRole(CREATOR_ROLE) {
-        if (startTime >= endTime) {
+        if (startTime >= endTime && endTime != 0) {
             revert BlueprintERC1155__InvalidStartEndTime();
         }
 
@@ -623,7 +663,7 @@ contract BlueprintERC1155 is
         address to,
         uint256 tokenId,
         uint256 amount
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         _mintETHInternal(to, tokenId, amount, address(0));
     }
 
@@ -640,7 +680,7 @@ contract BlueprintERC1155 is
         uint256 tokenId,
         uint256 amount,
         address referrer
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         _mintETHInternal(to, tokenId, amount, referrer);
     }
 
@@ -656,7 +696,7 @@ contract BlueprintERC1155 is
         uint256 tokenId,
         uint256 amount,
         address erc20Token
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _mintERC20Internal(to, tokenId, amount, erc20Token, address(0));
     }
 
@@ -675,7 +715,7 @@ contract BlueprintERC1155 is
         uint256 amount,
         address erc20Token,
         address referrer
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _mintERC20Internal(to, tokenId, amount, erc20Token, referrer);
     }
 
@@ -689,7 +729,7 @@ contract BlueprintERC1155 is
         address to,
         uint256[] memory tokenIds,
         uint256[] memory amounts
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         _batchMintETHInternal(to, tokenIds, amounts, address(0));
     }
 
@@ -706,7 +746,7 @@ contract BlueprintERC1155 is
         uint256[] memory tokenIds,
         uint256[] memory amounts,
         address referrer
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         _batchMintETHInternal(to, tokenIds, amounts, referrer);
     }
 
@@ -723,7 +763,7 @@ contract BlueprintERC1155 is
         uint256[] memory tokenIds,
         uint256[] memory amounts,
         address erc20Token
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _batchMintERC20Internal(to, tokenIds, amounts, erc20Token, address(0));
     }
 
@@ -743,7 +783,7 @@ contract BlueprintERC1155 is
         uint256[] memory amounts,
         address erc20Token,
         address referrer
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _batchMintERC20Internal(to, tokenIds, amounts, erc20Token, referrer);
     }
 
@@ -763,7 +803,7 @@ contract BlueprintERC1155 is
         uint256 amount,
         address erc20Token,
         bool allowFeeOnTransfer
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _mintERC20BatchSafeInternal(
             to,
             tokenId,
@@ -791,7 +831,7 @@ contract BlueprintERC1155 is
         address erc20Token,
         bool allowFeeOnTransfer,
         address referrer
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _mintERC20BatchSafeInternal(
             to,
             tokenId,
@@ -810,6 +850,15 @@ contract BlueprintERC1155 is
         uint256 amount,
         address referrer
     ) internal {
+        // Validate recipient address
+        if (to == address(0)) {
+            revert BlueprintERC1155__ZeroRecipientAddress();
+        }
+        // Validate amount to prevent overflow in fee calculations
+        if (amount > MAX_MINT_AMOUNT) {
+            revert BlueprintERC1155__ExceedsMaxMintAmount(amount, MAX_MINT_AMOUNT);
+        }
+
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -852,11 +901,12 @@ contract BlueprintERC1155 is
             uint256 totalPrice = requiredPayment;
             platformFee =
                 (totalPrice * feeConfig.blueprintFeeBasisPoints) /
-                10000;
-            creatorFee = (totalPrice * feeConfig.creatorBasisPoints) / 10000;
+                BASIS_POINTS_DENOMINATOR;
+            creatorFee = (totalPrice * feeConfig.creatorBasisPoints) / BASIS_POINTS_DENOMINATOR;
             rewardPoolFee =
                 (totalPrice * feeConfig.rewardPoolBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
+            // Treasury gets remainder (rewardPoolFee goes to treasury if no recipient is set)
             treasuryAmount = totalPrice - platformFee - creatorFee;
         }
 
@@ -892,7 +942,7 @@ contract BlueprintERC1155 is
             revert BlueprintERC1155__CreatorFeeTransferFailed();
         }
 
-        // Send reward pool fee if recipient is set, otherwise it goes to treasury
+        // Send reward pool fee if recipient is set, otherwise it stays in treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             (bool rewardPoolSuccess, ) = feeConfig.rewardPoolRecipient.call{
                 value: rewardPoolFee
@@ -952,6 +1002,15 @@ contract BlueprintERC1155 is
         address erc20TokenAddress,
         address referrer
     ) internal {
+        // Validate recipient address
+        if (to == address(0)) {
+            revert BlueprintERC1155__ZeroRecipientAddress();
+        }
+        // Validate amount to prevent overflow in fee calculations
+        if (amount > MAX_MINT_AMOUNT) {
+            revert BlueprintERC1155__ExceedsMaxMintAmount(amount, MAX_MINT_AMOUNT);
+        }
+
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -1003,13 +1062,14 @@ contract BlueprintERC1155 is
             requiredPayment = erc20Price * amount;
             platformFee =
                 (requiredPayment * feeConfig.blueprintFeeBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
             creatorFee =
                 (requiredPayment * feeConfig.creatorBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
             rewardPoolFee =
                 (requiredPayment * feeConfig.rewardPoolBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
+            // Treasury gets remainder (rewardPoolFee goes to treasury if no recipient is set)
             treasuryAmount = requiredPayment - platformFee - creatorFee;
         }
 
@@ -1055,7 +1115,7 @@ contract BlueprintERC1155 is
             creatorFee
         );
 
-        // Send reward pool fee if recipient is set, otherwise it goes to treasury
+        // Send reward pool fee if recipient is set, otherwise it stays in treasury
         if (rewardPoolFee > 0 && feeConfig.rewardPoolRecipient != address(0)) {
             erc20Token.safeTransferFrom(
                 msg.sender,
@@ -1103,6 +1163,10 @@ contract BlueprintERC1155 is
         uint256[] memory amounts,
         address referrer
     ) internal {
+        // Validate recipient address
+        if (to == address(0)) {
+            revert BlueprintERC1155__ZeroRecipientAddress();
+        }
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
@@ -1171,11 +1235,12 @@ contract BlueprintERC1155 is
                 payment = drop.price * amounts[i];
                 platformFee =
                     (payment * config.blueprintFeeBasisPoints) /
-                    10000;
-                creatorFee = (payment * config.creatorBasisPoints) / 10000;
+                    BASIS_POINTS_DENOMINATOR;
+                creatorFee = (payment * config.creatorBasisPoints) / BASIS_POINTS_DENOMINATOR;
                 rewardPoolFee =
                     (payment * config.rewardPoolBasisPoints) /
-                    10000;
+                    BASIS_POINTS_DENOMINATOR;
+                // Treasury gets remainder (rewardPoolFee goes to treasury if no recipient is set)
                 treasuryAmount = payment - platformFee - creatorFee;
             }
 
@@ -1248,6 +1313,10 @@ contract BlueprintERC1155 is
         address erc20TokenAddress,
         address referrer
     ) internal {
+        // Validate recipient address
+        if (to == address(0)) {
+            revert BlueprintERC1155__ZeroRecipientAddress();
+        }
         if (tokenIds.length != amounts.length) {
             revert BlueprintERC1155__BatchLengthMismatch();
         }
@@ -1338,10 +1407,11 @@ contract BlueprintERC1155 is
                 // PAID MINT: Normal fee distribution
                 payment = erc20Price * amounts[i];
                 platformFee = (payment * config.blueprintFeeBasisPoints) /
-                    10000;
-                creatorFee = (payment * config.creatorBasisPoints) / 10000;
+                    BASIS_POINTS_DENOMINATOR;
+                creatorFee = (payment * config.creatorBasisPoints) / BASIS_POINTS_DENOMINATOR;
                 rewardPoolFee = (payment * config.rewardPoolBasisPoints) /
-                    10000;
+                    BASIS_POINTS_DENOMINATOR;
+                // Treasury gets remainder (rewardPoolFee goes to treasury if no recipient is set)
                 treasuryAmount = payment - platformFee - creatorFee;
             }
 
@@ -1403,6 +1473,15 @@ contract BlueprintERC1155 is
         bool allowFeeOnTransfer,
         address referrer
     ) internal {
+        // Validate recipient address
+        if (to == address(0)) {
+            revert BlueprintERC1155__ZeroRecipientAddress();
+        }
+        // Validate amount to prevent overflow in fee calculations
+        if (amount > MAX_MINT_AMOUNT) {
+            revert BlueprintERC1155__ExceedsMaxMintAmount(amount, MAX_MINT_AMOUNT);
+        }
+
         Drop memory drop = drops[tokenId];
         if (!drop.active) {
             revert BlueprintERC1155__DropNotActive();
@@ -1454,13 +1533,14 @@ contract BlueprintERC1155 is
             requiredPayment = erc20Price * amount;
             platformFee =
                 (requiredPayment * feeConfig.blueprintFeeBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
             creatorFee =
                 (requiredPayment * feeConfig.creatorBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
             rewardPoolFee =
                 (requiredPayment * feeConfig.rewardPoolBasisPoints) /
-                10000;
+                BASIS_POINTS_DENOMINATOR;
+            // Treasury gets remainder (rewardPoolFee goes to treasury if no recipient is set)
             treasuryAmount = requiredPayment - platformFee - creatorFee;
         }
 
@@ -1792,6 +1872,20 @@ contract BlueprintERC1155 is
         uint256 _rewardPoolBasisPoints,
         address _treasury
     ) external onlyRole(FACTORY_ROLE) {
+        // Validate critical addresses
+        if (_blueprintRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroBlueprintRecipient();
+        }
+        if (_creatorRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroCreatorRecipient();
+        }
+
+        // Validate total basis points don't exceed 100%
+        uint256 totalBasisPoints = _feeBasisPoints + _creatorBasisPoints + _rewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155__InvalidBasisPoints(totalBasisPoints);
+        }
+
         defaultFeeConfig = FeeConfig({
             blueprintRecipient: _blueprintRecipient,
             blueprintFeeBasisPoints: _feeBasisPoints,
@@ -1834,6 +1928,20 @@ contract BlueprintERC1155 is
         uint256 _rewardPoolBasisPoints,
         address _treasury
     ) external onlyRole(FACTORY_ROLE) {
+        // Validate critical addresses
+        if (_blueprintRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroBlueprintRecipient();
+        }
+        if (_creatorRecipient == address(0)) {
+            revert BlueprintERC1155__ZeroCreatorRecipient();
+        }
+
+        // Validate total basis points don't exceed 100%
+        uint256 totalBasisPoints = _feeBasisPoints + _creatorBasisPoints + _rewardPoolBasisPoints;
+        if (totalBasisPoints > BASIS_POINTS_DENOMINATOR) {
+            revert BlueprintERC1155__InvalidBasisPoints(totalBasisPoints);
+        }
+
         tokenFeeConfigs[tokenId] = FeeConfig({
             blueprintRecipient: _blueprintRecipient,
             blueprintFeeBasisPoints: _feeBasisPoints,
@@ -2041,4 +2149,59 @@ contract BlueprintERC1155 is
             defaultFeeConfig.treasury
         );
     }
+
+    // ===== PAUSE FUNCTIONALITY =====
+
+    /**
+     * @dev Pauses all minting operations - only callable by admin
+     * @notice Use in case of emergency to stop all minting
+     */
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses all minting operations - only callable by admin
+     */
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
+    }
+
+    // ===== EMERGENCY RECOVERY =====
+
+    /**
+     * @dev Withdraws stuck ETH from the contract - only callable by admin
+     * @notice Use only for recovering accidentally sent ETH
+     * @param to Address to send the stuck ETH to
+     */
+    function withdrawStuckETH(address to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 balance = address(this).balance;
+        if (balance == 0) {
+            revert BlueprintERC1155__NoStuckETH();
+        }
+        (bool success, ) = to.call{value: balance}("");
+        if (!success) {
+            revert BlueprintERC1155__WithdrawFailed();
+        }
+    }
+
+    /**
+     * @dev Withdraws stuck ERC20 tokens from the contract - only callable by admin
+     * @notice Use only for recovering accidentally sent tokens
+     * @param token Address of the ERC20 token to withdraw
+     * @param to Address to send the stuck tokens to
+     */
+    function withdrawStuckERC20(address token, address to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        IERC20 erc20 = IERC20(token);
+        uint256 balance = erc20.balanceOf(address(this));
+        if (balance == 0) {
+            revert BlueprintERC1155__NoStuckERC20();
+        }
+        erc20.safeTransfer(to, balance);
+    }
+
+    // ===== STORAGE GAP =====
+    // Reserved storage space for future upgrades
+    // This allows adding new state variables without breaking storage layout
+    uint256[50] private __gap;
 }
